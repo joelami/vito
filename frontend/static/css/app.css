@@ -1,0 +1,540 @@
+/* ── Vito — Paperback Theme ───────────────────────────────────────────────
+   Warm ivory paper, ink-brown text, and a muted terracotta/brass accent —
+   the visual language of an actual printed paperback, not a SaaS dashboard.
+   Literata (a typeface built for long-form book reading) for headline
+   numbers and titles; Courier Prime (a manuscript/typewriter revival) for
+   data and labels, standing in for a printed ledger rather than a terminal.
+   Semantic color (win/loss, pos/neg, confidence, result) is preserved and
+   deliberately NOT flattened into the accent — see tokens below.
+   ─────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Paper surface tiers (warm ivory, three steps) */
+  --bg:            #ece2cd;
+  --off:           #f1e9d7;
+  --surface:       #faf6ec;
+  --surface-hover: #f3ecdc;
+  --border:        #ddccaa;
+  --border-light:  #c9b483;
+  --text:          #2b2118;
+
+  /* Two-tier muted ink */
+  --dim:           #6b5a45;
+  --muted:         #8f7c5c;
+  --text-dim:      var(--dim);
+  --text-muted:    var(--muted);
+
+  /* Terracotta / brass accent (brand / non-semantic chrome only) —
+     evokes book cloth and gilt lettering, not a SaaS gradient. */
+  --gold:          #a15c2e;
+  --gold2:         #c17840;
+  --accent:        var(--gold);
+  --accent-dim:    rgba(161, 92, 46, 0.14);
+
+  /* Typography system: a book-reading serif for headline numbers/titles,
+     a manuscript-typewriter mono for everything else (data, labels, UI
+     chrome) — deliberately NOT the Cormorant/DM-Mono pairing every AI
+     "luxury dashboard" demo reaches for. */
+  --font-serif:    'Literata', serif;
+  --font-mono:     'Courier Prime', 'Courier New', monospace;
+
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* Confidence badges — three genuinely distinct treatments. Terracotta
+     reads as "highlighted/ink-stamped" so it carries High; Medium is a
+     dark ochre (clearly a different hue, not a lighter/darker terracotta);
+     Low is a neutral warm gray signaling "no strong signal," not a status
+     color. */
+  --conf-high-bg:  rgba(161, 92, 46, 0.16);
+  --conf-high-fg:  #8a4a24;
+  --conf-med-bg:   rgba(150, 114, 26, 0.16);
+  --conf-med-fg:   #7a5c15;
+  --conf-low-bg:   rgba(107, 93, 77, 0.14);
+  --conf-low-fg:   #6b5d4d;
+
+  /* Chart / polarity colors — a diverging forest-green/brick-red pair kept
+     fully distinct from the terracotta accent so a loss can never be
+     mistaken for a gain. Deepened from a typical bright SaaS green/red so
+     both stay legible (not neon) against ivory paper.
+     --chart-line is the single-series accent (bankroll curve only) and is
+     the one chart color allowed to take the terracotta retint. */
+  --chart-pos:      #2f7d4f;
+  --chart-pos-fill: rgba(47, 125, 79, 0.12);
+  --chart-neg:      #a13a2e;
+  --chart-neg-fill: rgba(161, 58, 46, 0.12);
+  --chart-line:     #a15c2e;
+  --chart-grid:     #e2d5b8;
+  --chart-axis:     #8a7a5f;
+  --chart-baseline: #cdb98c;
+
+  /* Result colors — win/loss/push/pending stay four distinguishable hues */
+  --win:     #2f7d4f;
+  --loss:    #a13a2e;
+  --push:    #8a7a5f;
+  --pending: #6b5d4d;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: light;
+}
+
+[x-cloak] { display: none !important; }
+
+a { color: inherit; }
+
+/* ── Top nav ────────────────────────────────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 22px;
+  height: 56px;
+}
+
+.brand {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  margin-right: 26px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand .mark { color: var(--gold); font-size: 10px; font-style: normal; }
+.brand .tag { font-family: var(--font-mono); letter-spacing: 1px; font-style: normal; }
+
+.nav-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; align-items: stretch; }
+.nav-tab {
+  display: flex;
+  align-items: center;
+  padding: 0 15px;
+  cursor: pointer;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.25s var(--ease), border-color 0.25s var(--ease);
+  user-select: none;
+}
+.nav-tab:hover { color: var(--text); }
+.nav-tab.active { color: var(--text); border-bottom-color: var(--gold); }
+
+.main { max-width: 1320px; margin: 0 auto; padding: 0; }
+
+.page-header { padding: 28px 24px 0; }
+.page-title { font-family: var(--font-serif); font-size: 30px; font-weight: 500; letter-spacing: -0.3px; color: var(--text); margin-bottom: 6px; }
+.page-subtitle { color: var(--dim); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; margin-bottom: 22px; max-width: 760px; }
+.page-content { padding: 0 24px 44px; }
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+}
+.card-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.card-title { font-family: var(--font-mono); font-weight: 700; font-size: 10.5px; text-transform: uppercase; letter-spacing: 2px; color: var(--text); }
+.card-sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
+.card-body { padding: 20px; }
+
+/* ── Stat cards ─────────────────────────────────────────────────────────
+   The signature pairing: a large book-serif number with a tiny uppercase,
+   wide-tracked mono label beneath it, like a caption under a figure in a
+   printed report. Used everywhere the app shows a headline metric (ROI,
+   hit rate, CLV). */
+.stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  transition: border-color 0.3s var(--ease), background 0.3s var(--ease);
+}
+.stat-card:hover { border-color: var(--gold); background: var(--off); }
+.stat-card-label { font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: var(--dim); }
+.stat-card-value { font-family: var(--font-serif); font-size: 36px; font-weight: 500; color: var(--text); letter-spacing: -0.3px; line-height: 1; }
+.stat-card-value.pos { color: var(--chart-pos); }
+.stat-card-value.neg { color: var(--chart-neg); }
+.stat-card-sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.stat-card-se { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ── Confidence badges ─────────────────────────────────────────────────
+   Three distinguishable treatments — terracotta=High, ochre=Medium, warm
+   gray=Low. Not one accent color at three opacities: hue itself carries
+   the signal. */
+.conf-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-weight: 700; font-size: 10.5px; letter-spacing: 1.2px;
+  border-radius: 0; padding: 3px 10px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.conf-badge.conf-High { background: var(--conf-high-bg); color: var(--conf-high-fg); border-color: rgba(161,92,46,0.4); }
+.conf-badge.conf-Medium { background: var(--conf-med-bg); color: var(--conf-med-fg); border-color: rgba(150,114,26,0.4); }
+.conf-badge.conf-Low { background: var(--conf-low-bg); color: var(--conf-low-fg); border-color: var(--border-light); }
+.conf-badge.conf-lg { font-size: 11.5px; padding: 5px 13px; }
+.conf-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+/* ── Edge / value text ──────────────────────────────────────────────── */
+.edge-value { font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; }
+.edge-value.pos { color: var(--chart-pos); }
+.num-pos { color: var(--chart-pos); }
+.num-neg { color: var(--chart-neg); }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 18px; border-radius: 0;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.8px;
+  cursor: pointer; border: 1px solid transparent;
+  transition: background 0.25s var(--ease), color 0.25s var(--ease), border-color 0.25s var(--ease);
+  white-space: nowrap;
+}
+.btn-primary { background: var(--gold); color: var(--surface); border-color: var(--gold); }
+.btn-primary:hover { background: var(--gold2); border-color: var(--gold2); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-outline { background: transparent; color: var(--dim); border: 1px solid var(--border-light); }
+.btn-outline:hover { background: var(--surface-hover); color: var(--text); border-color: var(--dim); }
+.btn-danger { background: rgba(161,58,46,.08); color: #8a2e22; border: 1px solid rgba(161,58,46,.35); }
+.btn-danger:hover { background: rgba(161,58,46,.16); }
+.btn-sm { padding: 6px 13px; font-size: 9.5px; }
+.btn-xs { padding: 4px 9px; font-size: 9px; letter-spacing: 1.2px; }
+.btn-block { width: 100%; justify-content: center; }
+
+/* ── Forms ──────────────────────────────────────────────────────────────
+   Underlined inputs (transparent, bottom-border only, terracotta on
+   focus) — a ledger-line pattern, cleaner than boxed fields. */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-label { font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.8px; color: var(--muted); }
+.form-control {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 7px 1px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.25s var(--ease);
+  width: 100%;
+}
+.form-control::placeholder { color: var(--muted); }
+.form-control:focus { border-bottom-color: var(--gold); }
+select.form-control {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+}
+.form-actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; }
+.form-hint { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.form-error { font-family: var(--font-mono); font-size: 11px; color: var(--chart-neg); margin-top: 6px; }
+
+/* ── Filter bar ─────────────────────────────────────────────────────── */
+.filter-bar { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.search-input, .select-filter {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 7px 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.25s var(--ease);
+}
+.search-input { min-width: 200px; }
+.search-input::placeholder { color: var(--muted); }
+.search-input:focus, .select-filter:focus { border-bottom-color: var(--gold); }
+.select-filter {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 10px) 55%, calc(100% - 5px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 20px;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12.5px; }
+.data-table th {
+  background: var(--off);
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  padding: 11px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table th.sortable { cursor: pointer; transition: color 0.2s; }
+.data-table th.sortable:hover { color: var(--dim); }
+.data-table th.sorted { color: var(--gold); }
+.data-table th.num, .data-table td.num { text-align: right; }
+.data-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+.data-table tbody tr { transition: background 0.2s var(--ease); }
+.data-table tbody tr:hover { background: var(--surface-hover); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table td.num { color: var(--dim); font-variant-numeric: tabular-nums; }
+.data-table td.muted { color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+
+.selectable-row { cursor: pointer; }
+.selectable-row:hover td { background: var(--surface-hover); }
+.selectable-row.selected td { background: rgba(161,92,46,0.10); }
+.selectable-row.selected td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+.selectable-row input[type="checkbox"] { accent-color: var(--gold); cursor: pointer; }
+.col-group-model { border-left: 1px dashed var(--border-light); }
+
+/* ── Team tag ───────────────────────────────────────────────────────── */
+.team-tag { font-weight: 700; }
+.matchup { display: flex; flex-direction: column; gap: 1px; }
+.matchup .away { color: var(--dim); font-size: 11.5px; }
+.matchup .home { color: var(--text); font-weight: 700; }
+.vs-sep { color: var(--muted); font-weight: 400; }
+
+.probable-line { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 3px; letter-spacing: 0.2px; }
+
+.qb-flag { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px; padding: 2px 8px; margin-top: 6px; border: 1px solid; text-transform: uppercase; }
+.qb-flag.out { color: var(--loss); background: rgba(161,58,46,0.10); border-color: rgba(161,58,46,0.3); }
+.qb-flag.questionable { color: var(--conf-med-fg); background: var(--conf-med-bg); border-color: rgba(150,114,26,0.3); }
+
+/* ── Game / edge cards (Dashboard) ─────────────────────────────────────
+   game-card-teams and game-card-best-edge get the serif treatment — each
+   card's headline matchup and headline edge number are the "big number"
+   moments on this page. */
+.game-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: border-color 0.3s var(--ease);
+}
+.game-card:hover { border-color: var(--border-light); }
+.game-card-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; padding: 18px 20px; flex-wrap: wrap;
+}
+.game-card-teams { font-family: var(--font-serif); font-size: 19px; font-weight: 500; color: var(--text); letter-spacing: -0.1px; }
+.game-card-teams .away { color: var(--dim); font-weight: 500; }
+.game-card-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-top: 5px; letter-spacing: 0.3px; }
+.game-card-best { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.game-card-best-label { font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); }
+.game-card-best-edge { font-family: var(--font-serif); font-size: 23px; font-weight: 500; color: var(--chart-pos); letter-spacing: -0.2px; }
+.game-card-opps { border-top: 1px solid var(--border); }
+.opp-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 70px 90px 70px 70px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: background 0.2s var(--ease);
+}
+.opp-row:last-child { border-bottom: none; }
+.opp-row .market-lbl { font-weight: 700; color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+.opp-row .side-lbl { color: var(--text); }
+.opp-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
+.opp-row .edge-num { text-align: right; font-weight: 700; color: var(--chart-pos); font-variant-numeric: tabular-nums; }
+.opp-best { background: rgba(161,92,46,0.08); }
+.empty-opps { padding: 16px 20px; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.game-card-actions { padding: 11px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+
+/* ── Source badges (Dashboard: synced vs. manually-entered game) ─────── */
+.source-badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 8.5px; font-weight: 700; padding: 3px 9px; border-radius: 0;
+  text-transform: uppercase; letter-spacing: 1.2px; margin-left: 9px;
+  vertical-align: middle;
+  border: 1px solid transparent;
+}
+.source-badge.synced { background: rgba(161,92,46,0.14); color: var(--conf-high-fg); border-color: rgba(161,92,46,0.35); }
+.source-badge.manual { background: transparent; color: var(--muted); border-color: var(--border-light); }
+
+/* ── League pills (Ratings: switch which league's table is shown) ────── */
+.league-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.league-pill {
+  padding: 6px 16px;
+  border: 1px solid var(--border-light);
+  color: var(--dim);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 1.6px; text-transform: uppercase;
+  cursor: pointer; user-select: none;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.league-pill:hover { color: var(--text); border-color: var(--dim); }
+.league-pill.active { background: var(--gold); color: var(--surface); border-color: var(--gold); }
+
+/* ── Section divider (Dashboard: primary vs. secondary/fallback flow) ── */
+.section-divider {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--gold);
+  text-transform: uppercase; letter-spacing: 3px;
+  padding-top: 26px; margin-top: 6px; margin-bottom: 4px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Result badges ──────────────────────────────────────────────────────
+   win/loss/push/pending stay four distinguishable colors — never terracotta. */
+.result-badge { font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 0; text-transform: uppercase; letter-spacing: 1.1px; }
+.result-badge.win { background: rgba(47,125,79,0.16); color: var(--win); }
+.result-badge.loss { background: rgba(161,58,46,0.16); color: var(--loss); }
+.result-badge.push { background: rgba(138,122,95,0.18); color: var(--push); }
+.result-badge.pending { background: rgba(107,93,77,0.12); color: var(--pending); }
+
+/* ── Backtest honesty banner ────────────────────────────────────────── */
+.honesty-banner {
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--muted);
+  border-radius: 0;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.65;
+}
+.honesty-banner strong { color: var(--text); font-weight: 700; }
+.config-strip {
+  display: flex; flex-wrap: wrap; gap: 7px 20px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-bottom: 20px;
+}
+.config-strip span b { color: var(--dim); font-weight: 700; }
+
+/* ── Charts ─────────────────────────────────────────────────────────── */
+.chart-wrap { position: relative; width: 100%; }
+.chart-wrap canvas { max-width: 100%; }
+.chart-wrap.h-220 { height: 220px; }
+.chart-wrap.h-260 { height: 260px; }
+.chart-wrap.h-300 { height: 300px; }
+
+/* ── Loading / empty ────────────────────────────────────────────────── */
+.spinner-wrap { display: flex; align-items: center; justify-content: center; padding: 64px; }
+.spinner {
+  width: 26px; height: 26px;
+  border: 2px solid var(--border);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty-state { text-align: center; padding: 56px 20px; color: var(--muted); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.3px; }
+
+/* ── Pagination ─────────────────────────────────────────────────────── */
+.pagination { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 20px 0 4px; }
+.page-btn {
+  padding: 7px 14px; border-radius: 0; border: 1px solid var(--border);
+  background: transparent; color: var(--dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase;
+  transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+.page-btn:hover:not(:disabled) { border-color: var(--dim); color: var(--text); }
+.page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Toast ──────────────────────────────────────────────────────────── */
+.toast-stack { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: 320px; }
+.toast {
+  background: var(--surface); border: 1px solid var(--border-light); border-radius: 0;
+  padding: 12px 16px; color: var(--text);
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 700; letter-spacing: 0.3px;
+  box-shadow: 0 4px 16px rgba(43,33,24,0.10);
+}
+.toast.error { border-color: rgba(161,58,46,.4); color: #8a2e22; }
+.toast.success { border-color: rgba(161,92,46,.45); }
+
+/* ── Misc utility ───────────────────────────────────────────────────── */
+.text-muted { color: var(--muted); }
+.text-dim { color: var(--dim); }
+.fw-bold { font-weight: 700; }
+.small { font-size: 12px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-20 { margin-bottom: 20px; }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.flex { display: flex; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.gap-8 { gap: 8px; }
+.wrap { flex-wrap: wrap; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .page-header, .page-content { padding-left: 14px; padding-right: 14px; }
+  .opp-row { grid-template-columns: 70px 1fr 60px 70px; }
+  .opp-row .num:nth-child(5), .opp-row .num:nth-child(6) { display: none; }
+}
+@media (max-width: 640px) {
+  .brand span.tag { display: none; }
+  .nav-tab { padding: 0 10px; font-size: 9.5px; }
+}

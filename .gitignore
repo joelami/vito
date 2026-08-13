@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.db
+.env
+.DS_Store
+.claude/
+
+# Raw datasets (7.6GB — hosted on Cloudflare R2, downloaded at boot by
+# core/dataset_sync.py, never committed to git). See docs/DEPLOYMENT.md.
+Datasets/
+
+# Harness output — logs, daily markdown reports, execution traces, version
+# manifests, decision log. Real operational data, but generated fresh by
+# every run, not something the deployed app needs shipped with it.
+logs/
+harness_versions/
+decision_log.jsonl
+
+# Local weather cache (sports/nfl/weather.py) — rebuilds itself from the
+# free Open-Meteo API, no reason to ship a stale local cache.
+backend/sports/nfl/weather_cache.csv
