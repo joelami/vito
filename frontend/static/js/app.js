@@ -40,6 +40,14 @@ function fmtInt(v) {
 // time) in a short, human date format instead.
 function fmtDate(raw) {
   if (!raw) return '—';
+  // Three shapes seen across this app: ESPN's full UTC timestamp
+  // ("2026-08-12T01:45Z"), manual-entry's plain date ("2026-08-12"), and
+  // SQLite's own datetime('now') format ("2026-08-11 14:30:16" — space
+  // instead of "T", no timezone suffix, but genuinely UTC by SQLite's own
+  // convention). Normalize the SQLite shape into the same ISO-with-Z form
+  // the first case already handles, rather than a third parsing branch.
+  const sqlDatetime = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+  if (sqlDatetime.test(raw)) raw = raw.replace(' ', 'T') + 'Z';
   const hasTime = raw.includes('T');
   const d = hasTime ? new Date(raw) : new Date(raw + 'T00:00:00');
   if (Number.isNaN(d.getTime())) return raw;
@@ -145,65 +153,6 @@ function drawDivergingBar(canvasId, labels, values, opts = {}) {
 // Single-series line (bankroll curve), with a muted dashed baseline at the
 // starting bankroll so over/under performance reads at a glance without any
 // "beating the market" framing.
-function drawBankrollLine(canvasId, labels, values, startValue) {
-  destroyChart(canvasId);
-  const ctx = document.getElementById(canvasId);
-  if (!ctx) return;
-  const accent = cssVar('--chart-line') || '#a15c2e';
-  const grid = cssVar('--chart-grid') || '#e2d5b8';
-  const axis = cssVar('--chart-axis') || '#8a7a5f';
-  const baseline = cssVar('--chart-baseline') || '#cdb98c';
-
-  const datasets = [{
-    label: 'Bankroll',
-    data: values,
-    borderColor: accent,
-    backgroundColor: accent + '1f',
-    fill: true,
-    tension: 0.25,
-    borderWidth: 2,
-    pointRadius: 0,
-    pointHoverRadius: 4,
-    pointHoverBackgroundColor: accent,
-    pointHoverBorderColor: cssVar('--surface') || '#faf6ec',
-    pointHoverBorderWidth: 2,
-  }];
-
-  if (startValue !== undefined && startValue !== null) {
-    datasets.push({
-      label: 'Starting bankroll',
-      data: labels.map(() => startValue),
-      borderColor: baseline,
-      borderDash: [4, 4],
-      borderWidth: 1,
-      pointRadius: 0,
-      fill: false,
-    });
-  }
-
-  activeCharts[canvasId] = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 250 },
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: axis, font: { size: 10 }, maxTicksLimit: 8 } },
-        y: { grid: { color: grid }, ticks: { color: axis, font: { size: 11 } } },
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`,
-          },
-        },
-      },
-    },
-  });
-}
 
 // CFB is ratings-only (no live ESPN sync — see main.py's startup comment on
 // why) so it will always show zero picks on Suggestions/Parlay; both of
@@ -215,7 +164,6 @@ const LEAGUE_ORDER = ['NFL', 'CFB', 'MLB', 'NBA', 'NHL'];
 function app() {
   return {
     route: { page: 'suggestions' },
-    teams: [],
     toasts: [],
 
     suggestions: {
@@ -224,7 +172,10 @@ function app() {
       mlbProbables: {},   // espn_event_id -> {home, away}
     },
 
-    qbStatuses: {},        // team display name -> starter_out() dict
+    liveRecord: {
+      loading: true,
+      data: null,
+    },
 
     parlay: {
       loading: true,
@@ -233,19 +184,6 @@ function app() {
       combining: false,
       combineResult: null,
       combineError: '',
-    },
-
-    dash: {
-      loading: true,
-      games: [],
-      showForm: false,
-      saving: false,
-      formError: '',
-      form: emptyManualGameForm(),
-      synced: {
-        loading: true,
-        games: [],
-      },
     },
 
     ratings: {
@@ -258,35 +196,24 @@ function app() {
 
     livetrack: {
       loading: true,
-      data: null,
+      bySport: {},   // sport -> /api/forward-test response
     },
 
-    betlog: {
+    parlayTrack: {
       loading: true,
-      bets: [],
-      filterStatus: '',
-      showForm: false,
-      saving: false,
-      formError: '',
-      form: emptyBetForm(),
-      bankroll: null,
-      bankrollLoading: true,
+      data: null,   // /api/forward-test/parlays response
     },
 
     // ── Init / routing ──────────────────────────────────────────────────
     async init() {
       window.addEventListener('hashchange', () => this.parseRoute());
       this.parseRoute();
-      try {
-        const list = await apiGet('/api/ratings');
-        this.teams = (list || []).map(r => r.team);
-      } catch (e) { /* ratings tab load will surface the error */ }
     },
 
     parseRoute() {
       const hash = window.location.hash.replace('#', '').replace(/^\//, '') || 'suggestions';
       const page = hash.split('/')[0] || 'suggestions';
-      const valid = ['suggestions', 'parlay', 'dashboard', 'ratings', 'livetrack', 'betlog'];
+      const valid = ['suggestions', 'parlay', 'ratings', 'livetrack'];
       this.route = { page: valid.includes(page) ? page : 'suggestions' };
       this.onRouteChange(this.route.page);
     },
@@ -299,10 +226,8 @@ function app() {
       destroyAllCharts();
       if (page === 'suggestions') this.loadSuggestions();
       else if (page === 'parlay') this.loadSuggestions();
-      else if (page === 'dashboard') { this.loadDashboard(); this.loadSyncedGames(); }
       else if (page === 'ratings') this.loadRatings();
       else if (page === 'livetrack') this.loadForwardTrack();
-      else if (page === 'betlog') { this.loadBets(); this.loadBankroll(); }
     },
 
     toast(message, type = 'success') {
@@ -329,101 +254,6 @@ function app() {
       return b ? b.edge_pct : null;
     },
 
-    // ── Dashboard ─────────────────────────────────────────────────────────
-    async loadDashboard() {
-      this.dash.loading = true;
-      try {
-        const games = await apiGet('/api/games/manual');
-        (games || []).forEach(g => { g._best = this.bestOpp(g); g._source = 'manual'; });
-        this.dash.games = games || [];
-      } catch (e) {
-        this.toast('Failed to load games: ' + e.message, 'error');
-      } finally { this.dash.loading = false; }
-    },
-
-    get sortedDashGames() {
-      return this.sortGamesByEdge(this.dash.games);
-    },
-
-    // Real games synced from ESPN (schedule + live DraftKings odds), scored
-    // through the model — this is the primary Dashboard source; manual entry
-    // is the secondary/fallback path for props or games ESPN doesn't have.
-    async loadSyncedGames() {
-      this.dash.synced.loading = true;
-      try {
-        const games = await apiGet('/api/games/upcoming?sport=NFL');
-        (games || []).forEach(g => { g._best = this.bestOpp(g); g._source = 'synced'; });
-        this.dash.synced.games = games || [];
-      } catch (e) {
-        this.toast('Failed to load synced games: ' + e.message, 'error');
-      } finally { this.dash.synced.loading = false; }
-      this.loadQbStatuses();
-    },
-
-    // NFL-only context flag: starting-QB availability (Out/Doubtful/Questionable),
-    // see sports/nfl/injuries.py. Purely informational — silent on failure,
-    // same reasoning as MLB probables above.
-    async loadQbStatuses() {
-      try {
-        const data = await apiGet('/api/injuries/qb-status');
-        this.qbStatuses = data.statuses || {};
-      } catch (e) { /* silent — bonus context, not required */ }
-    },
-
-    qbFlagFor(teamName) {
-      const s = this.qbStatuses[teamName];
-      if (!s) return null;
-      if (s.likely_out) return { label: 'QB ' + s.status_abbr + ': ' + s.name, cls: 'out' };
-      if (s.questionable) return { label: 'QB Q: ' + s.name, cls: 'questionable' };
-      return null;
-    },
-
-    get sortedSyncedGames() {
-      return this.sortGamesByEdge(this.dash.synced.games);
-    },
-
-    sortGamesByEdge(games) {
-      return [...games].sort((a, b) => {
-        const ea = a._best ? a._best.edge_pct : -Infinity;
-        const eb = b._best ? b._best.edge_pct : -Infinity;
-        return eb - ea;
-      });
-    },
-
-    async submitManualGame() {
-      const f = this.dash.form;
-      if (!f.date || !f.home_team || !f.away_team) {
-        this.dash.formError = 'Date, home team, and away team are required.';
-        return;
-      }
-      if (f.home_team === f.away_team) {
-        this.dash.formError = 'Home and away team must be different.';
-        return;
-      }
-      this.dash.formError = '';
-      this.dash.saving = true;
-      try {
-        await apiSend('/api/games/manual', 'POST', f);
-        this.toast('Game added');
-        this.dash.form = emptyManualGameForm();
-        this.dash.showForm = false;
-        await this.loadDashboard();
-      } catch (e) {
-        this.dash.formError = e.message;
-      } finally { this.dash.saving = false; }
-    },
-
-    async deleteManualGame(id) {
-      if (!confirm('Remove this game?')) return;
-      try {
-        await apiSend(`/api/games/manual/${id}`, 'DELETE');
-        this.toast('Game removed');
-        this.dash.games = this.dash.games.filter(g => g.id !== id);
-      } catch (e) {
-        this.toast('Failed to remove game: ' + e.message, 'error');
-      }
-    },
-
     // ── Suggestions of the Day (main page) ──────────────────────────────
     // Every currently-live, already-qualifying edge across every league in
     // one place — the model already decided what qualifies (harness.py's
@@ -445,6 +275,17 @@ function app() {
         this.suggestions.loading = false;
         this.parlay.loading = false;
       }
+    },
+
+    // "Vito's record since going live" — the real, cross-league forward-test
+    // track record (see /api/forward-test/summary's docstring). Lives on
+    // Live Track Record, loaded alongside that page's per-league detail.
+    async loadLiveRecord() {
+      this.liveRecord.loading = true;
+      try {
+        this.liveRecord.data = await apiGet('/api/forward-test/summary');
+      } catch (e) { /* silent — bonus summary, not required */ }
+      finally { this.liveRecord.loading = false; }
     },
 
     // MLB-only context flag: who's announced to start and their season
@@ -586,22 +427,54 @@ function app() {
     // ── Live Track Record (forward test) ────────────────────────────────
     // The harness's real, ongoing track record: every qualifying edge found
     // in a real (not historical) game, logged at the honest opening price
-    // and settled against the real result. Distinct from Backtest (replays
-    // history) and Bet Log (only bets the user actually placed). Reuses the
-    // Backtest tab's stat-card / honesty-banner / table patterns as-is —
-    // no new chart or palette needed here.
+    // and settled against the real result. This is where "how is Vito
+    // doing" lives — the cross-league summary (loadLiveRecord, above) plus
+    // a per-league breakdown, one section per sport, each league's own
+    // model kept fully separate the same way it is everywhere else in
+    // this app. CFB excluded — it's never live-synced (ratings-only, see
+    // core/dispatch.py's LIVE_SPORTS), so it would only ever show empty.
+    liveSports: ['NFL', 'MLB', 'NBA', 'NHL'],
+
     async loadForwardTrack() {
       this.livetrack.loading = true;
+      this.loadLiveRecord();
+      this.loadParlayTrack();
       try {
-        this.livetrack.data = await apiGet('/api/forward-test?sport=NFL');
+        const results = await Promise.all(
+          this.liveSports.map(sp => apiGet('/api/forward-test?sport=' + sp).then(data => [sp, data]))
+        );
+        this.livetrack.bySport = Object.fromEntries(results);
       } catch (e) {
         this.toast('Failed to load live track record: ' + e.message, 'error');
       } finally { this.livetrack.loading = false; }
     },
 
-    get sortedForwardPicks() {
-      const picks = (this.livetrack.data && this.livetrack.data.picks) || [];
+    sortedForwardPicks(sp) {
+      const picks = (this.livetrack.bySport[sp] && this.livetrack.bySport[sp].picks) || [];
       return [...picks].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    },
+
+    // How Vito's actual suggested parlays (2/3/4/5-leg combos surfaced on
+    // Suggestions/Parlay) have done for real — the parlay counterpart to
+    // the per-league picks above. Cross-league by nature (a parlay's legs
+    // can span sports), so it's one flat log, not bucketed under liveSports.
+    async loadParlayTrack() {
+      this.parlayTrack.loading = true;
+      try {
+        this.parlayTrack.data = await apiGet('/api/forward-test/parlays');
+      } catch (e) { /* silent — bonus detail, not required for the page to work */ }
+      finally { this.parlayTrack.loading = false; }
+    },
+
+    sortedForwardParlays() {
+      const parlays = (this.parlayTrack.data && this.parlayTrack.data.parlays) || [];
+      return [...parlays].sort((a, b) => (b.snapshotted_at || '').localeCompare(a.snapshotted_at || ''));
+    },
+
+    parlayLegSummary(p) {
+      return (p.legs || [])
+        .map(l => `${l.sport} ${l.away_team} @ ${l.home_team} — ${marketLabel(l.market)} ${sideLabel(l)}${lineDisplay(l)}`)
+        .join('  ·  ');
     },
 
     forwardResultLabel(p) {
@@ -615,107 +488,6 @@ function app() {
       return ['win', 'loss', 'push'].includes(p.result) ? p.result : 'pending';
     },
 
-    // ── Bet Log ───────────────────────────────────────────────────────────
-    async loadBets() {
-      this.betlog.loading = true;
-      try {
-        const qs = this.betlog.filterStatus ? `?status=${encodeURIComponent(this.betlog.filterStatus)}` : '';
-        this.betlog.bets = await apiGet('/api/bets' + qs);
-      } catch (e) {
-        this.toast('Failed to load bets: ' + e.message, 'error');
-      } finally { this.betlog.loading = false; }
-    },
-
-    async loadBankroll() {
-      this.betlog.bankrollLoading = true;
-      try {
-        const data = await apiGet('/api/bankroll');
-        this.betlog.bankroll = data;
-        await this.$nextTick();
-        if (data.curve && data.curve.length) {
-          drawBankrollLine(
-            'chartBetlogBankroll',
-            data.curve.map(p => p.date),
-            data.curve.map(p => Number(p.bankroll.toFixed(2))),
-            data.starting_bankroll
-          );
-        }
-      } catch (e) {
-        this.toast('Failed to load bankroll: ' + e.message, 'error');
-      } finally { this.betlog.bankrollLoading = false; }
-    },
-
-    async submitBet() {
-      const f = this.betlog.form;
-      if (!f.game_label || !f.market || !f.side || !f.odds_taken || !f.stake || !f.placed_at) {
-        this.betlog.formError = 'Game, market, side, odds, stake, and date are required.';
-        return;
-      }
-      this.betlog.formError = '';
-      this.betlog.saving = true;
-      try {
-        await apiSend('/api/bets', 'POST', f);
-        this.toast('Bet logged');
-        this.betlog.form = emptyBetForm();
-        this.betlog.showForm = false;
-        await this.loadBets();
-        await this.loadBankroll();
-      } catch (e) {
-        this.betlog.formError = e.message;
-      } finally { this.betlog.saving = false; }
-    },
-
-    async updateBetResult(bet, result) {
-      try {
-        await apiSend(`/api/bets/${bet.id}`, 'PUT', { result });
-        this.toast('Bet updated');
-        await this.loadBets();
-        await this.loadBankroll();
-      } catch (e) {
-        this.toast('Failed to update bet: ' + e.message, 'error');
-      }
-    },
-
-    async updateBetClosing(bet, closingOddsStr) {
-      const closing_odds = closingOddsStr === '' ? null : Number(closingOddsStr);
-      try {
-        await apiSend(`/api/bets/${bet.id}`, 'PUT', { closing_odds });
-        this.toast('Closing odds saved');
-        await this.loadBets();
-      } catch (e) {
-        this.toast('Failed to save closing odds: ' + e.message, 'error');
-      }
-    },
-
-    async deleteBet(id) {
-      if (!confirm('Delete this bet?')) return;
-      try {
-        await apiSend(`/api/bets/${id}`, 'DELETE');
-        this.toast('Bet deleted');
-        this.betlog.bets = this.betlog.bets.filter(b => b.id !== id);
-        await this.loadBankroll();
-      } catch (e) {
-        this.toast('Failed to delete bet: ' + e.message, 'error');
-      }
-    },
-
   };
 }
 
-function emptyManualGameForm() {
-  return {
-    date: new Date().toISOString().slice(0, 10),
-    home_team: '', away_team: '',
-    home_odds: null, away_odds: null,
-    home_line: null, home_line_odds: null, away_line_odds: null,
-    total_line: null, over_odds: null, under_odds: null,
-  };
-}
-
-function emptyBetForm() {
-  return {
-    sport: 'NFL', game_label: '', market: 'moneyline', side: 'home',
-    line: null, odds_taken: null, stake: null,
-    placed_at: new Date().toISOString().slice(0, 10), notes: '',
-  };
-}

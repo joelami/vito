@@ -123,6 +123,33 @@ CREATE TABLE IF NOT EXISTS forward_picks (
     settled_at TEXT,
     UNIQUE(sport, espn_event_id, market, side, line)
 );
+
+-- The parlay counterpart to forward_picks: every combo the app actually
+-- surfaced as a "Suggested Parlay" (same pool, same suggest_parlays() call,
+-- same per-leg-count trim as /api/suggestions/daily), snapshotted once so it
+-- can be graded later against the real outcome instead of only ever existing
+-- as a live, disposable API response. Cross-league by nature (parlay legs
+-- are pooled from every sport's pending picks at once, same as the
+-- Suggestions page), so there's no `sport` column here the way forward_picks
+-- has one — see harness.py's snapshot_new_parlays().
+CREATE TABLE IF NOT EXISTS forward_parlays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    leg_count INTEGER NOT NULL,
+    theme TEXT,
+    leg_signature TEXT NOT NULL UNIQUE,  -- sorted forward_picks.id list, joined -- dedupes re-suggestion of an unchanged combo
+    pick_ids TEXT NOT NULL,              -- JSON array of forward_picks.id, one per leg
+    legs_json TEXT NOT NULL,             -- human-readable snapshot of each leg (sport/matchup/market/side/line/odds), so the UI never has to re-join forward_picks
+    combined_decimal_odds REAL NOT NULL,
+    combined_model_prob REAL,
+    combined_market_fair_prob REAL,
+    edge_pct REAL,
+    kelly_stake REAL,
+    snapshotted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    settled INTEGER NOT NULL DEFAULT 0,
+    result TEXT,
+    profit_units REAL,
+    settled_at TEXT
+);
 """
 
 

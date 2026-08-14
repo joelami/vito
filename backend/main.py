@@ -7,6 +7,7 @@ and Photo Location Finder.
 """
 
 import importlib
+import json
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -419,6 +420,48 @@ def get_backtest():
 # going forward. See docs/METHODOLOGY.md for why this is the bar that
 # actually matters more than the backtest.
 # ---------------------------------------------------------------------------
+@app.get("/api/forward-test/summary")
+def get_forward_test_summary():
+    """
+    The cross-league version of /api/forward-test below — "Vito's record
+    since going live," aggregated across every sport instead of one at a
+    time. Same honest-numbers discipline: real settled picks only, priced
+    at the open, nothing backtested or hypothetical.
+    """
+    with database.get_db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM forward_picks").fetchall()]
+
+    settled = [r for r in rows if r["settled"]]
+    decided = [r for r in settled if r["result"] != "push"]
+    wins = sum(1 for r in decided if r["result"] == "win")
+    clv_vals = [r["clv_pct"] for r in settled if r["clv_pct"] is not None]
+    total_profit = sum(r["profit_units"] or 0.0 for r in settled)
+    live_since = min((r["snapshotted_at"] for r in rows), default=None)
+
+    def sport_summary(sp):
+        s = [r for r in settled if r["sport"] == sp]
+        sd = [r for r in s if r["result"] != "push"]
+        sw = sum(1 for r in sd if r["result"] == "win")
+        return {
+            "sport": sp, "bets": len(s),
+            "pending": len([r for r in rows if r["sport"] == sp and not r["settled"]]),
+            "hit_rate": (sw / len(sd)) if sd else None,
+            "roi_pct": (sum(r["profit_units"] or 0.0 for r in s) / len(s) * 100.0) if s else None,
+        }
+
+    return {
+        "live_since": live_since,
+        "overall": {
+            "bets": len(settled), "pending": len(rows) - len(settled),
+            "hit_rate": (wins / len(decided)) if decided else None,
+            "roi_pct": (total_profit / len(settled) * 100.0) if settled else None,
+            "avg_clv_pct": (sum(clv_vals) / len(clv_vals)) if clv_vals else None,
+            "pct_positive_clv": (sum(1 for v in clv_vals if v > 0) / len(clv_vals)) if clv_vals else None,
+        },
+        "by_sport": [sport_summary(sp) for sp in LIVE_SPORTS],
+    }
+
+
 @app.get("/api/forward-test")
 def get_forward_test(sport: str = "NFL"):
     with database.get_db() as conn:
@@ -458,6 +501,50 @@ def get_forward_test(sport: str = "NFL"):
     }
 
 
+@app.get("/api/forward-test/parlays")
+def get_forward_test_parlays():
+    """
+    The parlay counterpart to /api/forward-test above — grades exactly the
+    combos the harness snapshotted as "Suggested Parlays" (see harness.py's
+    snapshot_new_parlays), the same honest-numbers discipline: real settled
+    parlays only, priced off each leg's own real opening odds. Cross-league
+    by nature (a parlay's legs can span sports), so unlike /api/forward-test
+    this isn't filtered by `sport`.
+    """
+    with database.get_db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM forward_parlays ORDER BY snapshotted_at DESC"
+        ).fetchall()]
+    for r in rows:
+        r["legs"] = json.loads(r.pop("legs_json"))
+        r["pick_ids"] = json.loads(r["pick_ids"])
+
+    settled = [r for r in rows if r["settled"]]
+    decided = [r for r in settled if r["result"] != "push"]
+    wins = sum(1 for r in decided if r["result"] == "win")
+    total_profit = sum(r["profit_units"] or 0.0 for r in settled)
+
+    def size_summary(n):
+        s = [r for r in settled if r["leg_count"] == n]
+        sd = [r for r in s if r["result"] != "push"]
+        sw = sum(1 for r in sd if r["result"] == "win")
+        return {
+            "leg_count": n, "bets": len(s),
+            "hit_rate": (sw / len(sd)) if sd else None,
+            "roi_pct": (sum(r["profit_units"] or 0.0 for r in s) / len(s) * 100.0) if s else None,
+        }
+
+    return {
+        "overall": {
+            "bets": len(settled), "pending": len(rows) - len(settled),
+            "hit_rate": (wins / len(decided)) if decided else None,
+            "roi_pct": (total_profit / len(settled) * 100.0) if settled else None,
+        },
+        "by_leg_count": [size_summary(n) for n in range(2, 6)],
+        "parlays": rows,
+    }
+
+
 # ---------------------------------------------------------------------------
 # API: Suggestions of the Day — the main-page view: every currently-live,
 # already-qualifying edge across EVERY league in one place, plus cross-game
@@ -489,7 +576,7 @@ def _pending_picks(sport: str = None) -> list:
 
 
 @app.get("/api/suggestions/daily")
-def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 4):
+def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 5, parlays_per_size: int = 3):
     all_pending = _pending_picks()
 
     by_sport = {}
@@ -512,7 +599,23 @@ def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 4):
         )
         for p in all_pending
     ]
-    suggested_parlays = parlay.suggest_parlays(legs, max_legs=max_parlay_legs, top_n=5)
+    # Grouped by leg count rather than one flat top-N-by-edge cut. Real
+    # problem that fixed: a flat sort lets whichever leg-count happens to
+    # produce the biggest compounded edge today crowd out every other size
+    # — verified directly, even back when max_legs was already 4, the top-5
+    # never once included a single 4-leg combo, purely because compounded
+    # edge doesn't scale predictably with leg count (it depends on which
+    # specific games/edges happen to be available, not the leg count
+    # itself). `top_n` here is generous on purpose (not the final count
+    # shown) so every size category that has ANY qualifying combination is
+    # actually represented before `parlays_per_size` trims each one down.
+    raw_parlays = parlay.suggest_parlays(legs, max_legs=max_parlay_legs, top_n=500)
+    by_leg_count = {}
+    for p in raw_parlays:
+        by_leg_count.setdefault(len(p["legs"]), []).append(p)
+    suggested_parlays = []
+    for n in sorted(by_leg_count):
+        suggested_parlays.extend(by_leg_count[n][:parlays_per_size])
     # attach display context (sport/matchup) back onto each leg in the response,
     # since ParlayLeg itself only carries the game_key, not human-readable labels
     label_by_key = {f"{p['sport']}:{p['espn_event_id']}":

@@ -27,12 +27,13 @@ manifests (`harness_versions/`) and the decision log (`decision_log.jsonl`);
 see `versioning.py`'s module docstring for the full rationale.
 """
 
+import json
 import sys
 from datetime import datetime, timedelta
 
 import database
 import reports
-from core import espn_client, odds_math
+from core import espn_client, odds_math, parlay
 from core.backtest import settle_bet
 from core.dispatch import build_pipeline as _build_pipeline, score_matchup as _score_matchup, LIVE_SPORTS
 from versioning import RunTrace
@@ -242,6 +243,116 @@ def settle_finished_picks(sport: str) -> int:
     return settled
 
 
+def snapshot_new_parlays(max_legs: int = 5, parlays_per_size: int = 3, top_n_pool: int = 500) -> int:
+    """
+    The parlay counterpart to `snapshot_new_picks`. Mirrors exactly what
+    `/api/suggestions/daily` shows as "Suggested Parlays" — same pool (every
+    currently-pending forward_pick, across every league, since a parlay
+    isn't a single-sport concept the way a straight pick is), same
+    `suggest_parlays()` call, same per-leg-count trim — and persists the
+    result so Live Track Record can grade "how Vito's parlays actually did"
+    instead of parlays only ever existing as a live, disposable API
+    response. Idempotent via `leg_signature` (INSERT OR IGNORE): re-running
+    against an unchanged pending-picks pool re-derives the identical combos
+    and silently skips them.
+    """
+    with database.get_db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM forward_picks WHERE settled = 0").fetchall()]
+    if len(rows) < 2:
+        return 0
+    pick_by_id = {p["id"]: p for p in rows}
+
+    legs = [
+        parlay.ParlayLeg(
+            game_key=f"{p['sport']}:{p['espn_event_id']}", market=p["market"], side=p["side"],
+            line=p["line"], model_prob=p["model_prob"], market_odds=p["market_odds"],
+            market_fair_prob=p["market_fair_prob"], confidence=p["confidence"], pick_id=p["id"],
+        )
+        for p in rows
+    ]
+
+    raw_parlays = parlay.suggest_parlays(legs, max_legs=max_legs, top_n=top_n_pool)
+    by_leg_count = {}
+    for p in raw_parlays:
+        by_leg_count.setdefault(len(p["legs"]), []).append(p)
+    suggested = []
+    for n in sorted(by_leg_count):
+        suggested.extend(by_leg_count[n][:parlays_per_size])
+
+    logged = 0
+    with database.get_db() as conn:
+        for p in suggested:
+            pick_ids = sorted(leg["pick_id"] for leg in p["legs"])
+            signature = "-".join(str(i) for i in pick_ids)
+            legs_snapshot = [
+                {
+                    "pick_id": leg["pick_id"], "sport": pick_by_id[leg["pick_id"]]["sport"],
+                    "date": pick_by_id[leg["pick_id"]]["date"],
+                    "home_team": pick_by_id[leg["pick_id"]]["home_team"],
+                    "away_team": pick_by_id[leg["pick_id"]]["away_team"],
+                    "market": leg["market"], "side": leg["side"], "line": leg["line"],
+                    "market_odds": leg["market_odds"],
+                }
+                for leg in p["legs"]
+            ]
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO forward_parlays "
+                "(leg_count, theme, leg_signature, pick_ids, legs_json, combined_decimal_odds, "
+                "combined_model_prob, combined_market_fair_prob, edge_pct, kelly_stake) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (len(p["legs"]), p["theme"], signature, json.dumps(pick_ids), json.dumps(legs_snapshot),
+                 p["combined_decimal_odds"], p["combined_model_prob"], p["combined_market_fair_prob"],
+                 p["edge_pct"], p["kelly_stake"]),
+            )
+            if cur.rowcount:
+                logged += 1
+    return logged
+
+
+def settle_finished_parlays() -> int:
+    """
+    A logged parlay settles once every leg it was built from has settled —
+    which can lag well behind any single leg's own game, since parlay legs
+    are deliberately drawn from different games/sports. Any settled leg that
+    lost breaks the whole ticket (real parlay payout structure — one bad leg
+    loses the entire stake). A leg that pushed drops out of the decision
+    (its stake is effectively returned, same as a real sportsbook settles a
+    push inside a parlay) rather than breaking the parlay; if every leg
+    pushed, the parlay itself pushes. Otherwise the payout uses only the
+    decided (non-push) legs' own odds, same reduced-parlay math a book uses.
+    """
+    settled = 0
+    with database.get_db() as conn:
+        pending = conn.execute("SELECT * FROM forward_parlays WHERE settled = 0").fetchall()
+        for prow in pending:
+            pick_ids = json.loads(prow["pick_ids"])
+            placeholders = ",".join("?" * len(pick_ids))
+            legs = conn.execute(
+                f"SELECT * FROM forward_picks WHERE id IN ({placeholders})", pick_ids
+            ).fetchall()
+            if len(legs) != len(pick_ids) or any(not l["settled"] for l in legs):
+                continue  # at least one leg's game hasn't finished yet
+
+            decided = [l for l in legs if l["result"] != "push"]
+            if any(l["result"] == "loss" for l in decided):
+                result, profit = "loss", -1.0
+            elif not decided:
+                result, profit = "push", 0.0
+            else:
+                decimal_odds = 1.0
+                for l in decided:
+                    decimal_odds *= l["market_odds"]
+                result, profit = "win", decimal_odds - 1.0
+
+            conn.execute(
+                "UPDATE forward_parlays SET settled = 1, result = ?, profit_units = ?, "
+                "settled_at = datetime('now') WHERE id = ?",
+                (result, profit, prow["id"]),
+            )
+            settled += 1
+    return settled
+
+
 def print_report(sport: str = "NFL"):
     with database.get_db() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -368,6 +479,25 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[harness] {sport} FAILED: {e}", file=sys.stderr)
             failures.append(sport)
+
+    # Parlays are cross-league (pooled from every sport's pending picks at
+    # once — see snapshot_new_parlays' docstring), so they're graded once
+    # here, after every sport above has synced/settled its own picks, rather
+    # than per-sport. Settling runs on every invocation (sync-only included —
+    # a leg can finish between full runs the same way a straight pick can,
+    # see resync_and_settle's docstring); snapshotting new parlays only runs
+    # on a full pipeline pass, matching snapshot_new_picks.
+    try:
+        parlays_settled = settle_finished_parlays()
+        if parlays_settled:
+            print(f"[harness] settled {parlays_settled} parlays")
+        if not sync_only:
+            parlays_logged = snapshot_new_parlays()
+            print(f"[harness] logged {parlays_logged} new parlay suggestions")
+    except Exception as e:
+        print(f"[harness] parlay snapshot/settle FAILED: {e}", file=sys.stderr)
+        failures.append("PARLAYS")
+
     if failures:
         # one sport's failure (e.g. a season with zero synced games right now)
         # shouldn't stop the others from running and being graded — but the

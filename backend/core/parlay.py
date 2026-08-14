@@ -32,6 +32,7 @@ class ParlayLeg:
     market_fair_prob: float
     line: float = None     # None for moneyline
     confidence: str = None
+    pick_id: int = None    # forward_picks.id, when this leg was built from a logged pick (see harness.py's snapshot_new_parlays) -- unused by the pure combinatorics, carried through purely so a caller can trace a suggested parlay back to its settleable legs
 
 
 @dataclass

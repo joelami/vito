@@ -30,10 +30,8 @@
   <div class="nav-tabs">
     <div class="nav-tab" :class="{active: route.page === 'suggestions'}" @click="navigate('suggestions')">Suggestions</div>
     <div class="nav-tab" :class="{active: route.page === 'parlay'}" @click="navigate('parlay')">Parlay</div>
-    <div class="nav-tab" :class="{active: route.page === 'dashboard'}" @click="navigate('dashboard')">Dashboard</div>
     <div class="nav-tab" :class="{active: route.page === 'ratings'}" @click="navigate('ratings')">Ratings</div>
     <div class="nav-tab" :class="{active: route.page === 'livetrack'}" @click="navigate('livetrack')">Live Track Record</div>
-    <div class="nav-tab" :class="{active: route.page === 'betlog'}" @click="navigate('betlog')">Bet Log</div>
   </div>
 </div>
 
@@ -257,217 +255,6 @@
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════════════ DASHBOARD -->
-  <section x-show="route.page === 'dashboard'" x-cloak>
-    <div class="page-header">
-      <div class="page-title">NFL Game Board</div>
-      <div class="page-subtitle">Every NFL game currently on the board — not just the ones that qualify. Suggestions (the main page) only shows picks that already clear the model's edge bar; this is the full picture underneath it: every synced game scored against live odds, including the ones with no real edge at all, plus manual entry below for anything ESPN doesn't carry (props, or a game it's missing).</div>
-    </div>
-    <div class="page-content">
-
-      <!-- ── Synced games (primary) ─────────────────────────────────── -->
-      <div class="flex-between mb-16">
-        <div class="text-muted small" x-text="dash.synced.games.length + ' synced game' + (dash.synced.games.length === 1 ? '' : 's')"></div>
-      </div>
-
-      <template x-if="dash.synced.loading">
-        <div class="spinner-wrap"><div class="spinner"></div></div>
-      </template>
-
-      <template x-if="!dash.synced.loading && dash.synced.games.length === 0">
-        <div class="empty-state">No synced games yet — check back once the season starts, or add a game manually below.</div>
-      </template>
-
-      <template x-if="!dash.synced.loading && dash.synced.games.length">
-        <div>
-          <template x-for="g in sortedSyncedGames" :key="g.espn_event_id">
-            <div class="game-card">
-              <div class="game-card-top">
-                <div>
-                  <div class="game-card-teams">
-                    <span class="away" x-text="g.away_team"></span> <span class="vs-sep">@</span> <span class="home" x-text="g.home_team"></span>
-                    <span class="source-badge synced">Synced</span>
-                  </div>
-                  <div class="game-card-meta" x-text="fmtDate(g.date)"></div>
-                  <template x-for="teamName in [g.away_team, g.home_team]" :key="teamName">
-                    <template x-if="qbFlagFor(teamName)">
-                      <span class="qb-flag" :class="qbFlagFor(teamName).cls" x-text="qbFlagFor(teamName).label"></span>
-                    </template>
-                  </template>
-                </div>
-                <template x-if="g._best">
-                  <div class="game-card-best">
-                    <span class="conf-badge conf-lg" :class="'conf-' + g._best.confidence" x-text="g._best.confidence + ' Confidence'"></span>
-                    <div>
-                      <span class="game-card-best-label" x-text="marketLabel(g._best.market) + ' ' + sideLabel(g._best) + ' · '"></span>
-                      <span class="game-card-best-edge" x-text="'+' + fmt(g._best.edge_pct, 1) + '% edge'"></span>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              <div class="game-card-opps" x-show="(g.opportunities || []).length">
-                <template x-for="(o, i) in sortedOpps(g)" :key="o.market + o.side">
-                  <div class="opp-row" :class="{'opp-best': i === 0}">
-                    <span class="market-lbl" x-text="marketLabel(o.market)"></span>
-                    <span class="side-lbl" x-text="sideLabel(o) + lineDisplay(o)"></span>
-                    <span class="num" x-text="fmt(o.market_odds, 2)"></span>
-                    <span class="edge-num" x-text="'+' + fmt(o.edge_pct, 1) + '%'"></span>
-                    <span class="conf-badge" :class="'conf-' + o.confidence" x-text="o.confidence"></span>
-                    <span class="num" x-text="fmt(o.kelly_stake * 100, 1) + '%'"></span>
-                  </div>
-                </template>
-              </div>
-              <div class="empty-opps" x-show="!(g.opportunities || []).length">No qualifying market data for this game yet.</div>
-              <div class="game-card-actions" x-show="g.last_synced_at">
-                <span class="text-muted small" x-text="'Last synced ' + g.last_synced_at"></span>
-              </div>
-            </div>
-          </template>
-        </div>
-      </template>
-
-      <!-- ── Manual games (secondary / fallback) ────────────────────── -->
-      <div class="section-divider">Add a game manually</div>
-      <div class="text-muted small mb-16">For props, odds ESPN doesn't have, or any game missing from the auto-synced list above.</div>
-
-      <div class="flex-between mb-16">
-        <div class="text-muted small" x-text="dash.games.length + ' manual game' + (dash.games.length === 1 ? '' : 's')"></div>
-        <button class="btn btn-primary btn-sm" @click="dash.showForm = !dash.showForm" x-text="dash.showForm ? 'Close' : '+ Add Game'"></button>
-      </div>
-
-      <!-- Add game form -->
-      <div class="card mb-20" x-show="dash.showForm" x-cloak>
-        <div class="card-header"><span class="card-title">Add Manual Game</span></div>
-        <div class="card-body">
-          <div class="form-grid mb-12">
-            <div class="form-group">
-              <label class="form-label">Date</label>
-              <input type="date" class="form-control" x-model="dash.form.date">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Home Team</label>
-              <select class="form-control" x-model="dash.form.home_team">
-                <option value="">Select…</option>
-                <template x-for="t in teams" :key="t"><option :value="t" x-text="t"></option></template>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Away Team</label>
-              <select class="form-control" x-model="dash.form.away_team">
-                <option value="">Select…</option>
-                <template x-for="t in teams" :key="t"><option :value="t" x-text="t"></option></template>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-hint mb-8">Moneyline (decimal odds)</div>
-          <div class="form-grid mb-12">
-            <div class="form-group">
-              <label class="form-label">Home Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.home_odds" placeholder="1.91">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Away Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.away_odds" placeholder="1.95">
-            </div>
-          </div>
-
-          <div class="form-hint mb-8">Spread</div>
-          <div class="form-grid mb-12">
-            <div class="form-group">
-              <label class="form-label">Home Line</label>
-              <input type="number" step="0.5" class="form-control" x-model.number="dash.form.home_line" placeholder="-2.5">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Home Line Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.home_line_odds" placeholder="1.91">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Away Line Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.away_line_odds" placeholder="1.91">
-            </div>
-          </div>
-
-          <div class="form-hint mb-8">Total</div>
-          <div class="form-grid mb-12">
-            <div class="form-group">
-              <label class="form-label">Total Line</label>
-              <input type="number" step="0.5" class="form-control" x-model.number="dash.form.total_line" placeholder="44.5">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Over Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.over_odds" placeholder="1.91">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Under Odds</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="dash.form.under_odds" placeholder="1.91">
-            </div>
-          </div>
-
-          <div class="form-error" x-show="dash.formError" x-text="dash.formError"></div>
-          <div class="form-actions">
-            <button class="btn btn-primary" @click="submitManualGame()" :disabled="dash.saving" x-text="dash.saving ? 'Saving…' : 'Save Game'"></button>
-            <button class="btn btn-outline" @click="dash.showForm = false">Cancel</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Loading -->
-      <template x-if="dash.loading">
-        <div class="spinner-wrap"><div class="spinner"></div></div>
-      </template>
-
-      <!-- Empty -->
-      <template x-if="!dash.loading && dash.games.length === 0">
-        <div class="empty-state">No games entered manually yet. Add one to see model edges.</div>
-      </template>
-
-      <!-- Game cards -->
-      <template x-if="!dash.loading">
-        <div>
-          <template x-for="g in sortedDashGames" :key="g.id">
-            <div class="game-card">
-              <div class="game-card-top">
-                <div>
-                  <div class="game-card-teams">
-                    <span class="away" x-text="g.away_team"></span> <span class="vs-sep">@</span> <span class="home" x-text="g.home_team"></span>
-                    <span class="source-badge manual">Manual</span>
-                  </div>
-                  <div class="game-card-meta" x-text="fmtDate(g.date)"></div>
-                </div>
-                <template x-if="g._best">
-                  <div class="game-card-best">
-                    <span class="conf-badge conf-lg" :class="'conf-' + g._best.confidence" x-text="g._best.confidence + ' Confidence'"></span>
-                    <div>
-                      <span class="game-card-best-label" x-text="marketLabel(g._best.market) + ' ' + sideLabel(g._best) + ' · '"></span>
-                      <span class="game-card-best-edge" x-text="'+' + fmt(g._best.edge_pct, 1) + '% edge'"></span>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              <div class="game-card-opps" x-show="(g.opportunities || []).length">
-                <template x-for="(o, i) in sortedOpps(g)" :key="o.market + o.side">
-                  <div class="opp-row" :class="{'opp-best': i === 0}">
-                    <span class="market-lbl" x-text="marketLabel(o.market)"></span>
-                    <span class="side-lbl" x-text="sideLabel(o) + lineDisplay(o)"></span>
-                    <span class="num" x-text="fmt(o.market_odds, 2)"></span>
-                    <span class="edge-num" x-text="'+' + fmt(o.edge_pct, 1) + '%'"></span>
-                    <span class="conf-badge" :class="'conf-' + o.confidence" x-text="o.confidence"></span>
-                    <span class="num" x-text="fmt(o.kelly_stake * 100, 1) + '%'"></span>
-                  </div>
-                </template>
-              </div>
-              <div class="empty-opps" x-show="!(g.opportunities || []).length">No qualifying market data for this game yet.</div>
-              <div class="game-card-actions">
-                <button class="btn btn-outline btn-xs" @click="deleteManualGame(g.id)">Remove</button>
-              </div>
-            </div>
-          </template>
-        </div>
-      </template>
-    </div>
-  </section>
-
   <!-- ═══════════════════════════════════════════════════════ RATINGS -->
   <section x-show="route.page === 'ratings'" x-cloak>
     <div class="page-header">
@@ -515,254 +302,215 @@
   <section x-show="route.page === 'livetrack'" x-cloak>
     <div class="page-header">
       <div class="page-title">Live Track Record</div>
-      <div class="page-subtitle">What the model would have done, for real — every qualifying edge logged at the honest opening price in an actual scheduled game, settled against the real result</div>
+      <div class="page-subtitle">How Vito is actually doing — every qualifying edge logged at the honest opening price in a real, scheduled game, settled against the real result. Grouped by league below; every league's model stays fully separate.</div>
     </div>
     <div class="page-content">
       <template x-if="livetrack.loading">
         <div class="spinner-wrap"><div class="spinner"></div></div>
       </template>
 
-      <template x-if="!livetrack.loading && livetrack.data">
+      <template x-if="!livetrack.loading">
         <div>
           <div class="honesty-banner">
             <strong>Read this before the numbers below.</strong> This is a forward-testing log, not a backtest and not a list of bets you placed — every pick here was flagged by the model in a real, scheduled game, snapshotted at the opening line before kickoff, then settled once the game finished.
-            <template x-if="livetrack.data.overall.bets > 0">
-              <span> So far: <strong :class="livetrack.data.overall.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="fmt(livetrack.data.overall.roi_pct,2) + '%'"></strong> ROI on <strong x-text="fmtInt(livetrack.data.overall.bets)"></strong> settled picks. This sample is small — treat it as noise, not signal, until it grows.</span>
+            <template x-if="liveRecord.data && liveRecord.data.overall.bets > 0">
+              <span> So far: <strong :class="liveRecord.data.overall.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="fmt(liveRecord.data.overall.roi_pct,2) + '%'"></strong> ROI on <strong x-text="fmtInt(liveRecord.data.overall.bets)"></strong> settled picks across every league. This sample is small — treat it as noise, not signal, until it grows.</span>
             </template>
-            <template x-if="livetrack.data.overall.bets === 0">
-              <span> Nothing has settled yet — the harness only scores real regular- and postseason games, and the season hasn't started. This tab fills in automatically once games are played; there's nothing broken here.</span>
+            <template x-if="!liveRecord.data || liveRecord.data.overall.bets === 0">
+              <span> Nothing has settled yet — this tab fills in automatically once real, scheduled games are played; there's nothing broken here.</span>
             </template>
           </div>
 
-          <!-- Summary cards -->
-          <div class="stat-cards mb-20">
-            <div class="stat-card">
-              <div class="stat-card-label">Overall ROI</div>
-              <div class="stat-card-value" :class="livetrack.data.overall.roi_pct == null ? '' : (livetrack.data.overall.roi_pct < 0 ? 'neg' : 'pos')" x-text="livetrack.data.overall.roi_pct == null ? '—' : fmt(livetrack.data.overall.roi_pct,2) + '%'"></div>
-              <div class="stat-card-se" x-text="'n=' + fmtInt(livetrack.data.overall.bets) + (livetrack.data.overall.pending ? '  ·  ' + fmtInt(livetrack.data.overall.pending) + ' pending' : '')"></div>
+          <!-- Vito's record since going live — cross-league summary -->
+          <template x-if="liveRecord.data && liveRecord.data.overall.bets > 0">
+            <div class="card mb-20">
+              <div class="card-header">
+                <span class="card-title">Vito's Record Since Going Live</span>
+                <span class="card-sub" x-text="'live since ' + fmtDate(liveRecord.data.live_since)"></span>
+              </div>
+              <div class="card-body">
+                <div class="stat-cards">
+                  <div class="stat-card">
+                    <div class="stat-card-label">Settled Picks</div>
+                    <div class="stat-card-value" x-text="fmtInt(liveRecord.data.overall.bets)"></div>
+                    <div class="stat-card-se" x-text="liveRecord.data.overall.pending ? fmtInt(liveRecord.data.overall.pending) + ' pending' : 'none pending'"></div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-card-label">Hit Rate</div>
+                    <div class="stat-card-value" x-text="liveRecord.data.overall.hit_rate != null ? fmt(liveRecord.data.overall.hit_rate*100,1) + '%' : '—'"></div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-card-label">ROI</div>
+                    <div class="stat-card-value" :class="liveRecord.data.overall.roi_pct < 0 ? 'neg' : 'pos'" x-text="liveRecord.data.overall.roi_pct != null ? fmt(liveRecord.data.overall.roi_pct,2) + '%' : '—'"></div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-card-label">Avg CLV</div>
+                    <div class="stat-card-value" :class="liveRecord.data.overall.avg_clv_pct < 0 ? 'neg' : 'pos'" x-text="liveRecord.data.overall.avg_clv_pct != null ? fmt(liveRecord.data.overall.avg_clv_pct,2) + '%' : '—'"></div>
+                  </div>
+                </div>
+                <template x-if="(liveRecord.data.by_sport || []).some(s => s.bets > 0)">
+                  <div class="table-scroll mt-16">
+                    <table class="data-table">
+                      <thead><tr><th>League</th><th class="num">Settled</th><th class="num">Hit %</th><th class="num">ROI %</th></tr></thead>
+                      <tbody>
+                        <template x-for="s in (liveRecord.data.by_sport || []).filter(s => s.bets > 0)" :key="s.sport">
+                          <tr>
+                            <td x-text="s.sport"></td>
+                            <td class="num" x-text="fmtInt(s.bets)"></td>
+                            <td class="num" x-text="s.hit_rate != null ? fmt(s.hit_rate*100,1) : '—'"></td>
+                            <td class="num fw-bold" :class="s.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="s.roi_pct != null ? fmt(s.roi_pct,2) : '—'"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
             </div>
-            <div class="stat-card">
-              <div class="stat-card-label">Hit Rate</div>
-              <div class="stat-card-value" x-text="livetrack.data.overall.hit_rate == null ? '—' : fmt(livetrack.data.overall.hit_rate*100,1) + '%'"></div>
-              <div class="stat-card-se" x-text="'n=' + fmtInt(livetrack.data.overall.bets) + ' settled picks'"></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-label">Avg CLV</div>
-              <div class="stat-card-value" :class="livetrack.data.overall.avg_clv_pct == null ? '' : (livetrack.data.overall.avg_clv_pct < 0 ? 'neg' : 'pos')" x-text="livetrack.data.overall.avg_clv_pct == null ? '—' : fmt(livetrack.data.overall.avg_clv_pct,2) + '%'"></div>
-              <div class="stat-card-se" x-text="livetrack.data.overall.pct_positive_clv == null ? '—' : fmt(livetrack.data.overall.pct_positive_clv*100,0) + '% of picks beat the close'"></div>
-            </div>
-          </div>
-
-          <!-- By market -->
-          <div class="card mb-20">
-            <div class="card-header"><span class="card-title">By Market</span><span class="card-sub">settled picks only</span></div>
-            <div class="table-scroll">
-              <table class="data-table">
-                <thead><tr><th>Market</th><th class="num">Bets</th><th class="num">ROI %</th><th class="num">Hit %</th><th class="num">Avg CLV %</th></tr></thead>
-                <tbody>
-                  <template x-for="m in (livetrack.data.by_market || [])" :key="m.market">
-                    <tr>
-                      <td x-text="marketLabel(m.market)"></td>
-                      <td class="num" x-text="fmtInt(m.bets)"></td>
-                      <td class="num fw-bold" :class="m.roi_pct == null ? '' : (m.roi_pct < 0 ? 'num-neg' : 'num-pos')" x-text="m.roi_pct == null ? '—' : fmt(m.roi_pct,2)"></td>
-                      <td class="num" x-text="m.hit_rate == null ? '—' : fmt(m.hit_rate*100,1)"></td>
-                      <td class="num" :class="m.avg_clv_pct == null ? '' : (m.avg_clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="m.avg_clv_pct == null ? '—' : fmt(m.avg_clv_pct,2)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Picks -->
-          <template x-if="(livetrack.data.picks || []).length === 0">
-            <div class="empty-state">No picks logged yet — this fills in automatically once the harness scores real, scheduled games.</div>
           </template>
-          <template x-if="(livetrack.data.picks || []).length">
-            <div class="card table-scroll">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Date</th><th>Matchup</th><th>Market / Side</th>
-                    <th class="num">Odds</th><th class="num">Edge %</th><th>Confidence</th>
-                    <th>Result</th><th class="num">CLV %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <template x-for="p in sortedForwardPicks" :key="p.id">
-                    <tr>
-                      <td class="muted" x-text="fmtDate(p.date)"></td>
-                      <td>
-                        <div class="matchup">
-                          <span class="away" x-text="p.away_team"></span>
-                          <span class="home" x-text="p.home_team"></span>
-                        </div>
-                      </td>
-                      <td x-text="marketLabel(p.market) + ' ' + sideLabel(p) + lineDisplay(p)"></td>
-                      <td class="num" x-text="fmt(p.market_odds,2)"></td>
-                      <td class="num edge-num" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
-                      <td><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
-                      <td><span class="result-badge" :class="forwardResultClass(p)" x-text="forwardResultLabel(p)"></span></td>
-                      <td class="num" :class="p.clv_pct == null ? '' : (p.clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="p.clv_pct != null ? fmt(p.clv_pct,2) : '—'"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
+
+          <!-- Suggested parlays' real track record — cross-league, same honest-numbers
+               discipline as everything else here: only parlays the app actually
+               surfaced as a "Suggested Parlay" get logged (harness.py's
+               snapshot_new_parlays), graded once every leg has settled. -->
+          <template x-if="parlayTrack.data && parlayTrack.data.overall.bets + parlayTrack.data.overall.pending > 0">
+            <div class="card mb-20">
+              <div class="card-header">
+                <span class="card-title">Suggested Parlays — Track Record</span>
+                <span class="card-sub">2–5 leg combos actually suggested, graded once every leg settles</span>
+              </div>
+              <div class="card-body">
+                <template x-if="parlayTrack.data.overall.bets === 0">
+                  <div class="empty-state">No suggested parlays have fully settled yet — <span x-text="fmtInt(parlayTrack.data.overall.pending)"></span> pending (every leg has to finish before a parlay can be graded).</div>
+                </template>
+                <template x-if="parlayTrack.data.overall.bets > 0">
+                  <div>
+                    <div class="stat-cards">
+                      <div class="stat-card">
+                        <div class="stat-card-label">Settled Parlays</div>
+                        <div class="stat-card-value" x-text="fmtInt(parlayTrack.data.overall.bets)"></div>
+                        <div class="stat-card-se" x-text="parlayTrack.data.overall.pending ? fmtInt(parlayTrack.data.overall.pending) + ' pending' : 'none pending'"></div>
+                      </div>
+                      <div class="stat-card">
+                        <div class="stat-card-label">Hit Rate</div>
+                        <div class="stat-card-value" x-text="parlayTrack.data.overall.hit_rate != null ? fmt(parlayTrack.data.overall.hit_rate*100,1) + '%' : '—'"></div>
+                      </div>
+                      <div class="stat-card">
+                        <div class="stat-card-label">ROI</div>
+                        <div class="stat-card-value" :class="parlayTrack.data.overall.roi_pct < 0 ? 'neg' : 'pos'" x-text="parlayTrack.data.overall.roi_pct != null ? fmt(parlayTrack.data.overall.roi_pct,2) + '%' : '—'"></div>
+                      </div>
+                    </div>
+
+                    <template x-if="(parlayTrack.data.by_leg_count || []).some(s => s.bets > 0)">
+                      <div class="table-scroll mt-16">
+                        <table class="data-table">
+                          <thead><tr><th>Legs</th><th class="num">Settled</th><th class="num">Hit %</th><th class="num">ROI %</th></tr></thead>
+                          <tbody>
+                            <template x-for="s in (parlayTrack.data.by_leg_count || []).filter(s => s.bets > 0)" :key="s.leg_count">
+                              <tr>
+                                <td x-text="s.leg_count + '-leg'"></td>
+                                <td class="num" x-text="fmtInt(s.bets)"></td>
+                                <td class="num" x-text="s.hit_rate != null ? fmt(s.hit_rate*100,1) : '—'"></td>
+                                <td class="num fw-bold" :class="s.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="s.roi_pct != null ? fmt(s.roi_pct,2) : '—'"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+
+                    <div class="table-scroll mt-16">
+                      <table class="data-table">
+                        <thead><tr><th>Logged</th><th>Legs</th><th class="num">Odds</th><th class="num">Edge %</th><th>Result</th><th class="num">Profit (u)</th></tr></thead>
+                        <tbody>
+                          <template x-for="p in sortedForwardParlays()" :key="p.id">
+                            <tr>
+                              <td class="muted" x-text="fmtDate(p.snapshotted_at)"></td>
+                              <td x-text="parlayLegSummary(p)"></td>
+                              <td class="num" x-text="fmt(p.combined_decimal_odds,2)"></td>
+                              <td class="num edge-num" x-text="p.edge_pct != null ? '+' + fmt(p.edge_pct,1) + '%' : '—'"></td>
+                              <td><span class="result-badge" :class="p.settled ? (['win','loss','push'].includes(p.result) ? p.result : 'pending') : 'pending'" x-text="p.settled ? ({win:'Win',loss:'Loss',push:'Push'}[p.result] || 'Pending') : 'Pending'"></span></td>
+                              <td class="num" :class="p.profit_units == null ? '' : (p.profit_units < 0 ? 'num-neg' : 'num-pos')" x-text="p.profit_units != null ? fmt(p.profit_units,2) : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </template>
+              </div>
             </div>
+          </template>
+
+          <!-- Per-league detail -->
+          <template x-for="sp in liveSports" :key="sp">
+            <template x-if="livetrack.bySport[sp]">
+              <div class="mb-20">
+                <div class="section-divider" x-text="sp + ' — ' + fmtInt(livetrack.bySport[sp].overall.bets) + ' settled' + (livetrack.bySport[sp].overall.pending ? ', ' + fmtInt(livetrack.bySport[sp].overall.pending) + ' pending' : '')"></div>
+
+                <template x-if="livetrack.bySport[sp].overall.bets === 0">
+                  <div class="empty-state">No settled picks yet for this league.</div>
+                </template>
+
+                <template x-if="livetrack.bySport[sp].overall.bets > 0">
+                  <div>
+                    <div class="stat-cards mb-16">
+                      <div class="stat-card">
+                        <div class="stat-card-label">ROI</div>
+                        <div class="stat-card-value" :class="livetrack.bySport[sp].overall.roi_pct < 0 ? 'neg' : 'pos'" x-text="fmt(livetrack.bySport[sp].overall.roi_pct,2) + '%'"></div>
+                        <div class="stat-card-se" x-text="'n=' + fmtInt(livetrack.bySport[sp].overall.bets)"></div>
+                      </div>
+                      <div class="stat-card">
+                        <div class="stat-card-label">Hit Rate</div>
+                        <div class="stat-card-value" x-text="livetrack.bySport[sp].overall.hit_rate != null ? fmt(livetrack.bySport[sp].overall.hit_rate*100,1) + '%' : '—'"></div>
+                      </div>
+                      <div class="stat-card">
+                        <div class="stat-card-label">Avg CLV</div>
+                        <div class="stat-card-value" :class="livetrack.bySport[sp].overall.avg_clv_pct < 0 ? 'neg' : 'pos'" x-text="livetrack.bySport[sp].overall.avg_clv_pct != null ? fmt(livetrack.bySport[sp].overall.avg_clv_pct,2) + '%' : '—'"></div>
+                        <div class="stat-card-se" x-text="livetrack.bySport[sp].overall.pct_positive_clv != null ? fmt(livetrack.bySport[sp].overall.pct_positive_clv*100,0) + '% beat the close' : ''"></div>
+                      </div>
+                    </div>
+
+                    <div class="card table-scroll">
+                      <table class="data-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th><th>Matchup</th><th>Market / Side</th>
+                            <th class="num">Odds</th><th class="num">Edge %</th><th>Confidence</th>
+                            <th>Result</th><th class="num">CLV %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="p in sortedForwardPicks(sp)" :key="p.id">
+                            <tr>
+                              <td class="muted" x-text="fmtDate(p.date)"></td>
+                              <td>
+                                <div class="matchup">
+                                  <span class="away" x-text="p.away_team"></span>
+                                  <span class="home" x-text="p.home_team"></span>
+                                </div>
+                              </td>
+                              <td x-text="marketLabel(p.market) + ' ' + sideLabel(p) + lineDisplay(p)"></td>
+                              <td class="num" x-text="fmt(p.market_odds,2)"></td>
+                              <td class="num edge-num" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
+                              <td><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
+                              <td><span class="result-badge" :class="forwardResultClass(p)" x-text="forwardResultLabel(p)"></span></td>
+                              <td class="num" :class="p.clv_pct == null ? '' : (p.clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="p.clv_pct != null ? fmt(p.clv_pct,2) : '—'"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
           </template>
         </div>
       </template>
     </div>
   </section>
 
-  <!-- ═══════════════════════════════════════════════════════ BET LOG -->
-  <section x-show="route.page === 'betlog'" x-cloak>
-    <div class="page-header">
-      <div class="page-title">Bet Log</div>
-      <div class="page-subtitle">Your own real-world bets — independent of the model backtest</div>
-    </div>
-    <div class="page-content">
-
-      <div class="flex-between mb-16 wrap gap-8">
-        <div class="filter-bar" style="margin-bottom:0;">
-          <select class="select-filter" x-model="betlog.filterStatus" @change="loadBets()">
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="win">Win</option>
-            <option value="loss">Loss</option>
-            <option value="push">Push</option>
-          </select>
-        </div>
-        <button class="btn btn-primary btn-sm" @click="betlog.showForm = !betlog.showForm" x-text="betlog.showForm ? 'Close' : '+ Log Bet'"></button>
-      </div>
-
-      <!-- Add bet form -->
-      <div class="card mb-20" x-show="betlog.showForm" x-cloak>
-        <div class="card-header"><span class="card-title">Log a Bet</span></div>
-        <div class="card-body">
-          <div class="form-grid mb-12">
-            <div class="form-group">
-              <label class="form-label">Sport</label>
-              <input type="text" class="form-control" x-model="betlog.form.sport" placeholder="NFL">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Game Label</label>
-              <input type="text" class="form-control" x-model="betlog.form.game_label" placeholder="NE @ SEA">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Market</label>
-              <select class="form-control" x-model="betlog.form.market">
-                <option value="moneyline">Moneyline</option>
-                <option value="spread">Spread</option>
-                <option value="total">Total</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Side</label>
-              <select class="form-control" x-model="betlog.form.side">
-                <option value="home">Home</option>
-                <option value="away">Away</option>
-                <option value="over">Over</option>
-                <option value="under">Under</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Line (optional)</label>
-              <input type="number" step="0.5" class="form-control" x-model.number="betlog.form.line" placeholder="-2.5">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Odds Taken</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="betlog.form.odds_taken" placeholder="1.91">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Stake</label>
-              <input type="number" step="0.01" class="form-control" x-model.number="betlog.form.stake" placeholder="25.00">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Placed At</label>
-              <input type="date" class="form-control" x-model="betlog.form.placed_at">
-            </div>
-          </div>
-          <div class="form-group mb-12">
-            <label class="form-label">Notes</label>
-            <input type="text" class="form-control" x-model="betlog.form.notes" placeholder="optional">
-          </div>
-          <div class="form-error" x-show="betlog.formError" x-text="betlog.formError"></div>
-          <div class="form-actions">
-            <button class="btn btn-primary" @click="submitBet()" :disabled="betlog.saving" x-text="betlog.saving ? 'Saving…' : 'Save Bet'"></button>
-            <button class="btn btn-outline" @click="betlog.showForm = false">Cancel</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bankroll curve -->
-      <div class="card mb-20">
-        <div class="card-header">
-          <span class="card-title">Bankroll</span>
-          <span class="card-sub" x-show="betlog.bankroll" x-text="betlog.bankroll ? ('Current: ' + fmt(betlog.bankroll.current_bankroll,2) + '  ·  ROI ' + fmt(betlog.bankroll.roi_pct,2) + '%  ·  staked ' + fmt(betlog.bankroll.total_staked,2)) : ''"></span>
-        </div>
-        <div class="card-body">
-          <template x-if="betlog.bankrollLoading">
-            <div class="spinner-wrap"><div class="spinner"></div></div>
-          </template>
-          <template x-if="!betlog.bankrollLoading && betlog.bankroll && (betlog.bankroll.curve || []).length">
-            <div class="chart-wrap h-220"><canvas id="chartBetlogBankroll"></canvas></div>
-          </template>
-          <template x-if="!betlog.bankrollLoading && (!betlog.bankroll || !(betlog.bankroll.curve || []).length)">
-            <div class="empty-state">No settled bets yet — bankroll curve fills in once bets are marked win/loss/push.</div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Bets table -->
-      <template x-if="betlog.loading">
-        <div class="spinner-wrap"><div class="spinner"></div></div>
-      </template>
-      <template x-if="!betlog.loading && betlog.bets.length === 0">
-        <div class="empty-state">No bets logged yet.</div>
-      </template>
-      <template x-if="!betlog.loading && betlog.bets.length">
-        <div class="card table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th><th>Game</th><th>Market</th><th>Side</th><th class="num">Line</th>
-                <th class="num">Odds</th><th class="num">Stake</th><th>Result</th>
-                <th class="num">Closing</th><th class="num">CLV %</th><th>Notes</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-for="b in betlog.bets" :key="b.id">
-                <tr>
-                  <td class="muted" x-text="b.placed_at"></td>
-                  <td x-text="b.game_label"></td>
-                  <td x-text="marketLabel(b.market)"></td>
-                  <td x-text="sideLabel(b)"></td>
-                  <td class="num" x-text="b.line ?? '—'"></td>
-                  <td class="num" x-text="fmt(b.odds_taken,2)"></td>
-                  <td class="num" x-text="fmt(b.stake,2)"></td>
-                  <td>
-                    <select class="select-filter" style="padding:4px 8px;font-size:11.5px;" :value="b.result" @change="updateBetResult(b, $event.target.value)">
-                      <option value="pending">Pending</option>
-                      <option value="win">Win</option>
-                      <option value="loss">Loss</option>
-                      <option value="push">Push</option>
-                    </select>
-                  </td>
-                  <td class="num">
-                    <input type="number" step="0.01" class="form-control" style="padding:4px 8px;width:80px;font-size:12px;" :value="b.closing_odds" @change="updateBetClosing(b, $event.target.value)" placeholder="odds">
-                  </td>
-                  <td class="num" :class="b.clv_pct == null ? '' : (b.clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="b.clv_pct != null ? fmt(b.clv_pct,2) : '—'"></td>
-                  <td class="muted" x-text="b.notes || ''"></td>
-                  <td><button class="btn btn-outline btn-xs" @click="deleteBet(b.id)">✕</button></td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </template>
-    </div>
-  </section>
 
 
 </main>
