@@ -19,3 +19,4 @@ decision_log.jsonl
 # Local weather cache (sports/nfl/weather.py) — rebuilds itself from the
 # free Open-Meteo API, no reason to ship a stale local cache.
 backend/sports/nfl/weather_cache.csv
+Bug Reporting/

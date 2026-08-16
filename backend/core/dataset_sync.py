@@ -20,6 +20,8 @@ mounted at the Datasets/ path in production (see docs/DEPLOYMENT.md) so the
 
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 DATASETS_DIR = Path(__file__).parent.parent.parent / "Datasets"
@@ -79,18 +81,37 @@ def sync_datasets(force: bool = False) -> None:
     DATASETS_DIR.mkdir(parents=True, exist_ok=True)
 
     paginator = client.get_paginator("list_objects_v2")
+    objects = [obj for page in paginator.paginate(Bucket=bucket) for obj in page.get("Contents", [])]
+
+    # Downloaded in parallel (16 concurrent files) rather than one at a time.
+    # Real problem this fixes: on a from-scratch container (first Railway
+    # boot, no volume yet) this download blocks the entire app startup —
+    # 1633 sequential files at typical per-request overhead alone easily
+    # blows past a platform's healthcheck window, confirmed directly against
+    # a real failed Railway deploy (5-minute healthcheck timeout, container
+    # killed before it ever got through the download). boto3's S3 client is
+    # safe to share across threads for this read-only usage; a lock only
+    # guards the progress counters, not the actual HTTP calls.
+    lock = threading.Lock()
     downloaded, total_bytes = 0, 0
-    for page in paginator.paginate(Bucket=bucket):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            dest = DATASETS_DIR / key
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(bucket, key, str(dest))
-            downloaded += 1
-            total_bytes += obj["Size"]
-            if downloaded % 10 == 0:
-                print(f"[dataset_sync] {downloaded} files, "
-                      f"{total_bytes / 1e6:.0f}MB downloaded so far...")
+
+    def _download_one(obj):
+        key = obj["Key"]
+        dest = DATASETS_DIR / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(bucket, key, str(dest))
+        return obj["Size"]
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        futures = {pool.submit(_download_one, obj): obj for obj in objects}
+        for future in as_completed(futures):
+            size = future.result()  # re-raises if this file's download failed
+            with lock:
+                downloaded += 1
+                total_bytes += size
+                if downloaded % 25 == 0 or downloaded == len(objects):
+                    print(f"[dataset_sync] {downloaded}/{len(objects)} files, "
+                          f"{total_bytes / 1e6:.0f}MB downloaded so far...")
 
     print(f"[dataset_sync] done — {downloaded} files, {total_bytes / 1e9:.2f}GB total.")
 
