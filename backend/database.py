@@ -195,6 +195,13 @@ def _fix_forward_picks_null_line_dupes(conn):
 
 
 def init_db():
+    # Real failure this fixes: `DB_PATH=/data/sports_bet.db` pointing at a
+    # Railway Volume mount that hasn't been created yet (or any other
+    # not-yet-existing parent dir) makes sqlite3.connect() fail outright
+    # with "unable to open database file" — confirmed directly against a
+    # real failed deploy. Harmless no-op for the common case (a local
+    # sibling-of-this-file default, or a parent dir that already exists).
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
     _fix_forward_picks_null_line_dupes(conn)
