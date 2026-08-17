@@ -43,6 +43,41 @@ LEAGUE_AVG_TEAM_SCORE = 4.6
 # no prior game date exists to diff against.
 LEAGUE_AVG_REST_DAYS = 1.0
 
+# Each team's CURRENT league (AL/NL), keyed by the same Retrosheet-style
+# franchise codes config.canonical_team() resolves to. Derived empirically
+# from the real historical dataset (see extra_matchup_features() below for
+# the exact derivation and why it matters that this wasn't typed from
+# memory) - not a static assumption, a verified snapshot of real data.
+TEAM_LEAGUE = {"ANA": "AL", "ARI": "NL", "ATH": "AL", "ATL": "NL", "BAL": "AL", "BOS": "AL",
+               "CHA": "AL", "CHN": "NL", "CIN": "NL", "CLE": "AL", "COL": "NL", "DET": "AL",
+               "HOU": "AL", "KCA": "AL", "LAN": "NL", "MIA": "NL", "MIL": "NL", "MIN": "AL",
+               "NYA": "AL", "NYN": "NL", "PHI": "NL", "PIT": "NL", "SDN": "NL", "SEA": "AL",
+               "SFN": "NL", "SLN": "NL", "TBA": "AL", "TEX": "AL", "TOR": "AL", "WAS": "NL"}
+
+# Each team's home ballpark IANA timezone - real, well-established public
+# information (each team's home city), used only to convert a live game's
+# real ESPN-synced UTC start time into local wall-clock time for a
+# day/night classification. ATH covers both Oakland and Sacramento (its
+# 2025+ interim home) since both are Pacific time.
+TEAM_TIMEZONE = {
+    "ANA": "America/Los_Angeles", "ARI": "America/Phoenix", "ATH": "America/Los_Angeles",
+    "ATL": "America/New_York", "BAL": "America/New_York", "BOS": "America/New_York",
+    "CHA": "America/Chicago", "CHN": "America/Chicago", "CIN": "America/New_York",
+    "CLE": "America/New_York", "COL": "America/Denver", "DET": "America/New_York",
+    "HOU": "America/Chicago", "KCA": "America/Chicago", "LAN": "America/Los_Angeles",
+    "MIA": "America/New_York", "MIL": "America/Chicago", "MIN": "America/Chicago",
+    "NYA": "America/New_York", "NYN": "America/New_York", "PHI": "America/New_York",
+    "PIT": "America/New_York", "SDN": "America/Los_Angeles", "SEA": "America/Los_Angeles",
+    "SFN": "America/Los_Angeles", "SLN": "America/Chicago", "TBA": "America/New_York",
+    "TEX": "America/Chicago", "TOR": "America/New_York", "WAS": "America/New_York",
+}
+
+# Local start hour >= this counts as a night game. Standard baseball
+# scheduling convention: day games cluster 12-3pm local, night games
+# cluster 6-8pm local, with essentially nothing scheduled in between, so
+# any reasonable cutoff in that gap is safe.
+NIGHT_GAME_LOCAL_HOUR = 17
+
 
 def _team_game_log(games: pd.DataFrame) -> pd.DataFrame:
     """Long format: one row per (team, game) so rolling stats can be computed per-team."""
@@ -251,8 +286,46 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row) -> d
     trained to see for a missing starter, not an invented one.
     """
     from .starting_pitcher import LEAGUE_AVG_SP_ER_PER_START
-    return {
+    row = {
         "home_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
         "away_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
         "sp_er_diff_lN": 0.0,
     }
+
+    # is_interleague: real, computable now, not a fallback -- both flagged
+    # by core/matchup.py's missing-feature warning as silently defaulting
+    # to False for every live MLB pick (see that warning's own message).
+    # TEAM_LEAGUE is derived EMPIRICALLY from the real historical dataset
+    # (games.groupby("home_franchise")["home_league"].last()), not typed
+    # from memory or general knowledge -- specifically because two teams
+    # really have changed leagues within this dataset's own window (HOU
+    # NL->AL in 2013, MIL AL->NL in 1998) and a memorized/guessed table
+    # risks getting exactly those two wrong. Verified: exactly a 15/15 AL/NL
+    # split, and taking each team's most recent recorded league correctly
+    # resolves both real transitions to their CURRENT league.
+    home_league = TEAM_LEAGUE.get(home_fr)
+    away_league = TEAM_LEAGUE.get(away_fr)
+    row["is_interleague"] = int(bool(home_league) and bool(away_league) and home_league != away_league)
+
+    # is_night: the game's REAL scheduled start time (ESPN-synced, passed in
+    # as `game_date`) converted to the home park's real local time, not a
+    # fabricated value -- classified using a standard baseball scheduling
+    # convention (day games cluster 12-3pm local, night games 6-8pm local,
+    # essentially nothing in between, so any reasonable cutoff in that gap
+    # is safe). TEAM_TIMEZONE is each team's real home city's IANA timezone
+    # (well-established, low-ambiguity public information, unlike
+    # TEAM_LEAGUE above) -- DST-aware via zoneinfo, not a fixed UTC offset.
+    # Falls back to False (day) only if the home team isn't in the table at
+    # all, which shouldn't happen for any real MLB franchise.
+    tz_name = TEAM_TIMEZONE.get(home_fr)
+    if tz_name is not None and game_date is not None:
+        from zoneinfo import ZoneInfo
+        gd = game_date
+        if gd.tzinfo is None:
+            gd = gd.tz_localize("UTC")
+        local_dt = gd.tz_convert(ZoneInfo(tz_name))
+        row["is_night"] = int(local_dt.hour >= NIGHT_GAME_LOCAL_HOUR)
+    else:
+        row["is_night"] = 0
+
+    return row
