@@ -217,3 +217,42 @@ ML_FEATURE_COLS = [
     "home_streak", "away_streak", "is_interleague", "is_night",
     "home_sp_er_lN", "away_sp_er_lN", "sp_er_diff_lN",
 ]
+
+
+def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row) -> dict:
+    """
+    Live-scoring counterpart to build_features' loader-derived sp_er_lN
+    columns above. core/matchup.py (the generic scorer every live MLB pick
+    goes through) calls this hook for a brand-new, not-yet-played game --
+    which has no loader row to pull home_sp_er_lN/away_sp_er_lN from, since
+    that requires starting_pitcher.attach_starter_quality(games), a
+    dataset-wide batch join that only runs once, offline, during
+    build_pipeline(). Without this hook, core/matchup.py's generic
+    fill-anything-missing-with-a-default loop was silently filling both
+    columns with 0.0 for every single live MLB prediction -- and 0.0 isn't
+    a neutral "no signal" value here, it's a real, wrong one: it reads as
+    "this starter has allowed zero earned runs across their last 8 starts,"
+    an extreme outlier that basically never happens in the training data
+    (league average is ~2.6). Fed to a HistGradientBoostingRegressor (which
+    branches on exact thresholds, unlike a linear model that would just
+    shrug off an off-distribution constant), that's a real, systematic bias
+    on every live MLB pick, not just missing information. Confirmed by
+    tracing core/matchup.py's fallback logic against this module's own
+    ML_FEATURE_COLS.
+
+    NOT fixed by actually computing each team's real confirmed starter's
+    current rolling form live (that needs today's probable-pitcher
+    identity, already surfaced for DISPLAY only via sports/mlb/probables.py,
+    joined against that specific pitcher's own recent starts -- a real
+    future enhancement, not attempted here). This hook instead falls back
+    to the same LEAGUE_AVG_SP_ER_PER_START neutral value the historical
+    pipeline already uses for any game outside its own event-file coverage
+    -- the honest "no live signal available" value the model was actually
+    trained to see for a missing starter, not an invented one.
+    """
+    from .starting_pitcher import LEAGUE_AVG_SP_ER_PER_START
+    return {
+        "home_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
+        "away_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
+        "sp_er_diff_lN": 0.0,
+    }

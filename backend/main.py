@@ -588,10 +588,26 @@ def _pending_picks(sport: str = None) -> list:
 def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 5, parlays_per_size: int = 3):
     all_pending = _pending_picks()
 
+    # Surfaced per-league so a viewer can tell how fresh each sport's data
+    # actually is — the in-process scheduler (see scheduler.py) only syncs
+    # once or twice a day now that this runs on Railway instead of a
+    # constantly-open local dev session, so "when was this last pulled"
+    # stopped being an implicit "just now" and needs to be an honest,
+    # visible number. MAX(last_synced_at) across a sport's espn_games is the
+    # real signal — it moves on every sync, full run or sync-only alike.
+    with database.get_db() as conn:
+        sync_rows = conn.execute(
+            "SELECT sport, MAX(last_synced_at) AS last_synced_at FROM espn_games GROUP BY sport"
+        ).fetchall()
+    last_synced_by_sport = {r["sport"]: r["last_synced_at"] for r in sync_rows}
+
     by_sport = {}
     for sport in LIVE_SPORTS:
         picks = [p for p in all_pending if p["sport"] == sport]
-        by_sport[sport] = {"count": len(picks), "picks": picks}
+        by_sport[sport] = {
+            "count": len(picks), "picks": picks,
+            "last_synced_at": last_synced_by_sport.get(sport),
+        }
 
     top_picks = sorted(all_pending, key=lambda p: p["edge_pct"], reverse=True)[:top_n]
 

@@ -315,6 +315,11 @@ function app() {
       return (d && d.sports && d.sports[sport] && d.sports[sport].picks) || [];
     },
 
+    sportLastSyncedAt(sport) {
+      const d = this.suggestions.data;
+      return (d && d.sports && d.sports[sport] && d.sports[sport].last_synced_at) || null;
+    },
+
     get totalSuggestionCount() {
       const d = this.suggestions.data;
       if (!d) return 0;

@@ -69,13 +69,16 @@
           </div>
 
           <template x-if="totalSuggestionCount === 0">
-            <div class="empty-state">Nothing qualifies right now — the harness only logs a suggestion once a real, scheduled game clears the same edge/confidence bar as the backtest. Check back once games are on the board, or see the Dashboard tab for every scored game (including ones that don't clear the bar).</div>
+            <div class="empty-state">Nothing qualifies right now — the harness only logs a suggestion once a real, scheduled game clears the same edge/confidence bar as the backtest. Check back once games are on the board.</div>
           </template>
 
           <template x-for="sp in leagueOrder" :key="sp">
             <template x-if="leaguePicks(sp).length">
               <div class="mb-20">
-                <div class="section-divider" x-text="sp + ' — ' + leaguePicks(sp).length + ' live suggestion' + (leaguePicks(sp).length === 1 ? '' : 's')"></div>
+                <div class="section-divider">
+                  <span x-text="sp + ' — ' + leaguePicks(sp).length + ' live suggestion' + (leaguePicks(sp).length === 1 ? '' : 's')"></span>
+                  <span class="section-divider-detail" x-text="sportLastSyncedAt(sp) ? 'data as of ' + fmtDate(sportLastSyncedAt(sp)) : ''"></span>
+                </div>
                 <div class="card table-scroll">
                   <table class="data-table">
                     <thead>
@@ -470,6 +473,25 @@
                         <div class="stat-card-se" x-text="livetrack.bySport[sp].overall.pct_positive_clv != null ? fmt(livetrack.bySport[sp].overall.pct_positive_clv*100,0) + '% beat the close' : ''"></div>
                       </div>
                     </div>
+
+                    <template x-if="(livetrack.bySport[sp].by_market || []).some(m => m.bets > 0)">
+                      <div class="table-scroll mb-16">
+                        <table class="data-table">
+                          <thead><tr><th>Market</th><th class="num">Bets</th><th class="num">Hit %</th><th class="num">ROI %</th><th class="num">Avg CLV %</th></tr></thead>
+                          <tbody>
+                            <template x-for="m in (livetrack.bySport[sp].by_market || []).filter(m => m.bets > 0)" :key="m.market">
+                              <tr>
+                                <td x-text="marketLabel(m.market)"></td>
+                                <td class="num" x-text="fmtInt(m.bets)"></td>
+                                <td class="num" x-text="m.hit_rate != null ? fmt(m.hit_rate*100,1) : '—'"></td>
+                                <td class="num fw-bold" :class="m.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="m.roi_pct != null ? fmt(m.roi_pct,2) : '—'"></td>
+                                <td class="num" :class="m.avg_clv_pct == null ? '' : (m.avg_clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="m.avg_clv_pct != null ? fmt(m.avg_clv_pct,2) : '—'"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
 
                     <div class="card table-scroll">
                       <table class="data-table">

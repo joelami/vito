@@ -432,6 +432,13 @@ select.form-control {
   text-transform: uppercase; letter-spacing: 3px;
   padding-top: 26px; margin-top: 6px; margin-bottom: 4px;
   border-top: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;
+}
+
+/* Trailing "data as of ..." freshness note on a section-divider — normal
+   case/weight/spacing so it doesn't compete with the uppercase label. */
+.section-divider-detail {
+  text-transform: none; letter-spacing: normal; font-weight: 500; color: var(--muted);
 }
 
 /* ── Result badges ──────────────────────────────────────────────────────
