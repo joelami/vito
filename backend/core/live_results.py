@@ -38,9 +38,20 @@ def fetch_completed_espn_results(sport: str, since_date=None) -> pd.DataFrame:
     """
     Returns a DataFrame shaped like a sport's own `loader.load_games()`
     output (home_franchise, away_franchise, home_score, away_score, date,
-    season, is_neutral_venue) built from real, completed, ESPN-synced
-    games — empty DataFrame (not None) if there's nothing to add, so
-    callers can unconditionally `pd.concat` without a branch.
+    season, is_neutral_venue, home_win, game_id) built from real, completed,
+    ESPN-synced games — empty DataFrame (not None) if there's nothing to
+    add, so callers can unconditionally `pd.concat` without a branch.
+
+    `home_win`/`game_id` matter beyond the rating engine: `current_form_
+    snapshot()`'s `_team_game_log()` helper requires both by name (see
+    sports/*/features.py) to compute rolling win%/rest-days/streak — without
+    them, concatenating this onto `games` still "works" (pandas just fills
+    NaN for the missing columns on the appended rows) but silently, wrongly
+    excludes every live-synced game from those rolling stats instead of
+    raising anything. `home_win` is trivially derivable here (home_score >
+    away_score); `game_id` gets a synthetic `live_<espn_event_id>` value,
+    distinct from the historical loader's own `<sport>_<n>` scheme by
+    construction so the two can never collide.
 
     `since_date` should be the historical dataset's own max date — only
     games strictly after it are included, which is what makes this safe to
@@ -50,7 +61,8 @@ def fetch_completed_espn_results(sport: str, since_date=None) -> pd.DataFrame:
     """
     sport = sport.upper()
     empty = pd.DataFrame(columns=["home_franchise", "away_franchise", "home_score",
-                                   "away_score", "date", "season", "is_neutral_venue"])
+                                   "away_score", "date", "season", "is_neutral_venue",
+                                   "home_win", "game_id"])
 
     with database.get_db() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -95,9 +107,12 @@ def fetch_completed_espn_results(sport: str, since_date=None) -> pd.DataFrame:
     df["away_franchise"] = df["away_team"].apply(canonical)
     df["season"] = df["date"].apply(config.season_for_date)
     df["is_neutral_venue"] = df["is_neutral_venue"].astype(bool)
+    df["home_win"] = (df["home_score"] > df["away_score"]).astype(int)
+    df["game_id"] = "live_" + df["espn_event_id"].astype(str)
 
     return df[["home_franchise", "away_franchise", "home_score", "away_score",
-               "date", "season", "is_neutral_venue"]].sort_values("date", kind="stable").reset_index(drop=True)
+               "date", "season", "is_neutral_venue", "home_win", "game_id"
+               ]].sort_values("date", kind="stable").reset_index(drop=True)
 
 
 def with_live_results(games: pd.DataFrame, sport: str, date_col: str = "date") -> pd.DataFrame:

@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -758,6 +758,37 @@ def get_bankroll(starting_bankroll: float = 1000.0):
         "total_staked": total_staked, "total_profit": total_profit, "roi_pct": roi_pct,
         "curve": curve,
     }
+
+
+# ---------------------------------------------------------------------------
+# API: manual harness trigger — a safety valve alongside the in-process
+# scheduler (scheduler.py), not a replacement for it. Real reason this
+# exists: the scheduler only fires at its own scheduled times (or once on
+# boot), and there's no Railway shell access to just run `python3
+# harness.py` by hand the way local dev can — this is the equivalent
+# for a deployed instance. Runs in a background thread (same pattern as
+# scheduler.py) so the request returns immediately rather than holding the
+# connection open for however long a full multi-sport pipeline rebuild
+# takes. Gated behind ADMIN_TOKEN (a shared secret, not real auth — this app
+# has none elsewhere either) so a public Railway URL can't have random
+# internet traffic triggering expensive compute; fails closed (503) if the
+# token isn't configured server-side at all, rather than defaulting open.
+# ---------------------------------------------------------------------------
+@app.post("/api/admin/run-harness")
+def trigger_harness_run(x_admin_token: str = Header(default=None)):
+    import os
+    import threading
+
+    configured_token = os.environ.get("ADMIN_TOKEN")
+    if not configured_token:
+        raise HTTPException(503, "ADMIN_TOKEN isn't set on this deployment — nothing to check the caller against.")
+    if x_admin_token != configured_token:
+        raise HTTPException(403, "Invalid or missing X-Admin-Token header.")
+
+    from scheduler import _run_full
+    threading.Thread(target=_run_full, daemon=True, name="manual-harness-run").start()
+    return {"status": "started", "detail": "Full harness run kicked off in the background for every LIVE_SPORTS "
+                                            "league — check /api/suggestions/daily in a minute or two."}
 
 
 # ---------------------------------------------------------------------------

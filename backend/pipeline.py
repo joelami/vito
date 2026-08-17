@@ -39,18 +39,17 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     games = attach_weather(games)  # disk-cached — see sports/nfl/weather.py
 
     # Real, ESPN-synced, COMPLETED games this season get folded into the Elo
-    # computation — see core/live_results.py's module docstring for the gap
-    # this closes (ratings used to be frozen at the historical file's last
-    # season, blind to every real result the live harness has already
-    # settled). Scoped deliberately to ratings only: `games_for_ratings` is
-    # used for `compute_power_ratings()` below, but `feats = build_features
-    # (games, ...)` a few lines down uses the ORIGINAL `games` — live rows
-    # don't carry the full odds/feature schema historical rows do, and
-    # mixing them into the walk-forward ML training data risks schema drift
-    # in the most heavily-tested part of this system. Safe by construction:
-    # live rows are always strictly AFTER the historical file's own max
-    # date, so nothing here can double-count or alter any historical game's
-    # pre-game rating lookup.
+    # computation AND the current-form snapshot below (current_form_snapshot
+    # (games_for_ratings), not the stale current_form_snapshot(games) this
+    # used to be) — see core/live_results.py's module docstring for the gap
+    # this closes. NOT used for the walk-forward ML training data, though:
+    # `feats = build_features(games, ...)` a few lines down deliberately
+    # keeps using the ORIGINAL `games` — live rows don't carry the full odds/
+    # feature schema historical rows do, and mixing them into training risks
+    # schema drift in the most heavily-tested part of this system. Safe by
+    # construction: live rows are always strictly AFTER the historical
+    # file's own max date, so nothing here can double-count or alter any
+    # historical game's pre-game rating/form lookup.
     games_for_ratings = live_results.with_live_results(games, "NFL")
     rr = compute_power_ratings(
         games_for_ratings, home_col="home_franchise", away_col="away_franchise",
@@ -105,7 +104,16 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     final_models = fit_final_models(feats, ML_FEATURE_COLS)
     current_season = nfl_config.season_for_date(datetime.now())
     current_ratings = rr.ratings_entering_season(current_season)
-    current_form = current_form_snapshot(games)
+    # games_for_ratings (not the static-only `games`), same real fix as
+    # `current_ratings` just above -- see core/live_results.py's module
+    # docstring. Real, confirmed bug this closes: current_form_snapshot(games)
+    # silently used ONLY the static historical file, which ends whenever last
+    # season's dataset was captured -- so every live prediction's rest_days
+    # was computed against a team's LAST HISTORICAL FILE game, not their real
+    # last game. Verified directly: this had a real team's home_rest_days at
+    # 324 for a live game (should be ~1-3), a wildly out-of-distribution value
+    # fed straight into a HistGradientBoostingRegressor for every live pick.
+    current_form = current_form_snapshot(games_for_ratings)
 
     # latest display name used per franchise (so relocated/rebranded teams show
     # their current name in the UI even though older rows kept their old name)
@@ -164,10 +172,11 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
             pass
 
     # Real, ESPN-synced, COMPLETED games this season folded into the Elo
-    # computation only — see core/live_results.py and build_nfl_pipeline()'s
-    # matching comment above for the full reasoning. Harmless no-op for CFB
-    # (never in LIVE_SPORTS, harness never syncs it — with_live_results()
-    # queries an always-empty result and returns `games` unchanged).
+    # computation AND the current-form snapshot below — see core/live_results.py
+    # and build_nfl_pipeline()'s matching comment above for the full
+    # reasoning. Harmless no-op for CFB (never in LIVE_SPORTS, harness never
+    # syncs it — with_live_results() queries an always-empty result and
+    # returns `games` unchanged).
     games_for_ratings = live_results.with_live_results(games, sport.upper())
     rr = compute_power_ratings(
         games_for_ratings, home_col="home_franchise", away_col="away_franchise",
@@ -225,7 +234,9 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
     final_models = fit_final_models(feats, features.ML_FEATURE_COLS)
     current_season = config.season_for_date(datetime.now())
     current_ratings = rr.ratings_entering_season(current_season)
-    current_form = features.current_form_snapshot(games)
+    # games_for_ratings, same fix and same reasoning as build_nfl_pipeline's
+    # matching comment above -- see core/live_results.py's module docstring.
+    current_form = features.current_form_snapshot(games_for_ratings)
 
     # display names: prefer each sport's own franchise_display_name() (MLB/NBA/NHL
     # all have one — see their config.py, built from the ESPN-name mapping the
