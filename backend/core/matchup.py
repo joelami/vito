@@ -17,12 +17,29 @@ it isn't mistaken for a deliberate feature.
 """
 
 import importlib
+import sys
 
 import pandas as pd
 
 
 def _sport_module(sport: str, name: str):
     return importlib.import_module(f"sports.{sport.lower()}.{name}")
+
+
+# Real bugs this set exists to catch automatically, going forward: a sport
+# adopts a real, hypothesis-tested feature via an offline attach_*() step
+# (e.g. MLB's starting_pitcher.attach_starter_quality) that build_features()
+# needs for training, but nobody wires an equivalent live source for a
+# not-yet-played game -- so it silently defaults to 0.0/False below, an
+# out-of-distribution value fed to the model for every live pick, not a
+# neutral "no signal" one. Confirmed twice directly, not hypothesized: MLB's
+# home_sp_er_lN/away_sp_er_lN defaulted to 0.0 (should be ~2.6), and
+# home_rest_days/away_rest_days defaulted via stale data to as much as 324
+# (should be single digits) before both were fixed. This module has no
+# business deciding those specific fixes on its own -- the honest fallback
+# IS still a neutral default -- but it should never again fail SILENTLY.
+# One warning per (sport, column) per process, not per game scored.
+_warned_missing_features = set()
 
 
 def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_team: str,
@@ -89,9 +106,19 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
     if extra_fn:
         row.update(extra_fn(home_fr, away_fr, game_date, home_row, away_row))
 
-    # fill anything ML_FEATURE_COLS expects that's still missing with a neutral default
+    # fill anything ML_FEATURE_COLS expects that's still missing with a neutral default --
+    # LOUDLY, not silently (see _warned_missing_features' comment above for why).
     for feat_col in features.ML_FEATURE_COLS:
         if feat_col not in row:
+            key = (sport, feat_col)
+            if key not in _warned_missing_features:
+                _warned_missing_features.add(key)
+                print(f"[matchup] WARNING: {sport}'s ML_FEATURE_COLS includes '{feat_col}', but "
+                      f"no live source (core row or extra_matchup_features()) supplies it for a "
+                      f"not-yet-played game -- defaulting to a neutral value for every live "
+                      f"{sport} pick from here on this process. If this feature is meant to carry "
+                      f"real signal live, it needs a real live source wired in, not just this "
+                      f"fallback (see MLB's starting_pitcher fix for the pattern).", file=sys.stderr)
             row[feat_col] = False if feat_col.startswith(("is_", "home_b2b", "away_b2b")) else 0.0
 
     return pd.DataFrame([row]), home_rating, away_rating, naive_total
