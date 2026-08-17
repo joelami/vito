@@ -69,15 +69,17 @@ Push to `main` (or click Deploy in Railway) and watch the build logs. First boot
 
 Once you see `Uvicorn running on http://0.0.0.0:...`, Railway will start routing traffic to it. Visit the Railway-provided URL (or a custom domain, set under **Settings → Networking**).
 
-## 7. The harness — Railway Cron, not launchd
+## 7. The harness — an in-process scheduler, not Railway Cron
 
-`launchd` (the current local scheduling — `com.sportsbet.harness.plist` / `.syncOnly.plist`) is macOS-only and doesn't exist on Railway. Railway has its own **Cron Jobs** feature that runs a one-off command on a schedule, in the same environment/variables as your main service:
+`launchd` (the current local scheduling — `com.sportsbet.harness.plist` / `.syncOnly.plist`) is macOS-only and doesn't exist on Railway. The obvious next thought is a separate Railway **Cron Job** service — but Railway Volumes are scoped to a single service, so a separate cron service wouldn't share the same `/data` volume as the main web service unless cross-service volume sharing is confirmed available on your plan. Get that wrong and the cron job silently writes to its own disconnected database — the harness "runs successfully" in its logs, but the web app never sees a single pick it logged. That's a worse failure mode than not scheduling it at all, because it looks like it's working.
 
-1. Railway project → **New → Cron Job** (or add a second service and set its type to Cron in Settings).
-2. Same GitHub repo, but override the start command:
-   - Daily full run: `cd backend && python3 harness.py`, schedule `0 9 * * *` (9am UTC — adjust for your timezone; Railway cron schedules are UTC).
-   - Evening sync-only pass: `cd backend && python3 harness.py --sync-only`, schedule `0 21 * * *`.
-3. Both need the same `R2_*` and `DB_PATH` variables as the main service (Railway lets you share a variable group across services, or just copy them over) — and both need to point at the **same** `/data` volume as the main service, or they'll each write to their own separate, disconnected database.
+Instead, `backend/scheduler.py` runs the harness **in-process**, inside the same container as the API server — guaranteeing "same filesystem, same `DB_PATH`" by construction, no cross-service assumptions needed. It's opt-in (off by default, so local dev via `python3 main.py` never double-runs against your own machine's launchd-scheduled harness):
+
+1. Railway → `vito` service → **Variables** → add `ENABLE_SCHEDULER=1`.
+2. That's it. On every boot it immediately runs a full harness pass once (so a fresh deploy/volume doesn't sit empty until the next scheduled time), then keeps running daily: a full pass at 09:00 UTC, a lighter sync-only pass at 21:00 UTC — both idempotent (see `harness.py`'s `snapshot_new_picks`/`settle_finished_picks` docstrings), so an extra run never double-logs anything.
+3. Override the two default times if needed via `SCHEDULER_FULL_RUN_UTC` / `SCHEDULER_SYNC_ONLY_UTC` (both `"HH:MM"` in UTC).
+
+Tradeoff worth knowing: the harness's model rebuild briefly shares CPU with the live web server once or twice a day (and once more on every redeploy, via the boot-time run). For this app's traffic level that's a non-issue; if it ever isn't, revisit a real separate service — but only after confirming volume sharing actually works, not before.
 
 ## What's already handled in code
 

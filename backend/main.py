@@ -106,6 +106,15 @@ def startup():
     except Exception as e:
         print(f"[startup] CFB ratings pipeline FAILED to build, skipping: {e}")
 
+    # Started last, after every pipeline above is already built — its own
+    # immediate boot-time harness pass (see scheduler.py) is a second, full
+    # pipeline rebuild, and letting the app's own startup (what the
+    # healthcheck is waiting on) finish first avoids competing for CPU
+    # during that already-slow window. No-op locally / anywhere
+    # ENABLE_SCHEDULER isn't set to "1" — see scheduler.py's docstring.
+    from scheduler import start_background_scheduler
+    start_background_scheduler()
+
 
 # ---------------------------------------------------------------------------
 # Request models
