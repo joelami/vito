@@ -33,12 +33,36 @@ SYNC_ONLY_AT = os.environ.get("SCHEDULER_SYNC_ONLY_UTC", "21:00")
 _CHECK_INTERVAL_S = 60
 
 
+def _run_parlays(snapshot_new: bool):
+    """
+    Real gap this closes: harness.py's own snapshot_new_parlays()/
+    settle_finished_parlays() only ever ran from its __main__ block (the
+    standalone `python3 harness.py` CLI path) -- which nothing on Railway
+    actually invokes. Both this function's callers below now mirror
+    __main__'s exact behavior: settle on every pass (a leg can finish
+    between runs same as a straight pick can), snapshot new parlays only on
+    a full pass (matches harness.py's `python3 harness.py --sync-only`
+    skipping it too). Confirmed missing directly: a live production run via
+    the admin trigger logged real straight picks but zero parlays.
+    """
+    try:
+        settled = harness.settle_finished_parlays()
+        if settled:
+            print(f"[scheduler] settled {settled} parlays")
+        if snapshot_new:
+            logged = harness.snapshot_new_parlays()
+            print(f"[scheduler] logged {logged} new parlay suggestions")
+    except Exception as e:
+        print(f"[scheduler] parlay snapshot/settle FAILED: {e}")
+
+
 def _run_full():
     for sport in LIVE_SPORTS:
         try:
             harness.run(sport)
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
+    _run_parlays(snapshot_new=True)
 
 
 def _run_sync_only():
@@ -48,6 +72,7 @@ def _run_sync_only():
             print(f"[scheduler] {sport} sync-only: {result}")
         except Exception as e:
             print(f"[scheduler] {sport} sync-only FAILED: {e}")
+    _run_parlays(snapshot_new=False)
 
 
 def _loop():
