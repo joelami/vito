@@ -86,7 +86,7 @@
                   <span class="section-divider-detail" x-text="sportLastSyncedAt(sp) ? 'data as of ' + fmtDate(sportLastSyncedAt(sp)) : ''"></span>
                 </div>
                 <div class="card table-scroll">
-                  <table class="data-table">
+                  <table class="data-table data-table-cards">
                     <thead>
                       <tr>
                         <th>Date</th><th>Matchup</th><th>Market / Side</th>
@@ -97,20 +97,20 @@
                     <tbody>
                       <template x-for="p in leaguePicks(sp)" :key="legKey(p)">
                         <tr>
-                          <td class="muted" x-text="fmtDate(p.date)"></td>
-                          <td>
+                          <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
+                          <td data-label="Matchup">
                             <div class="matchup">
                               <span class="away" x-text="p.away_team"></span>
                               <span class="home" x-text="p.home_team"></span>
                             </div>
                             <div class="probable-line" x-show="sp === 'MLB'" x-text="probablesFor(p) ? ('SP: ' + probableLabel(probablesFor(p).away) + ' @ ' + probableLabel(probablesFor(p).home)) : ''"></div>
                           </td>
-                          <td x-text="pickSideLine(p)"></td>
-                          <td class="num" x-text="fmt(p.market_odds,2)"></td>
-                          <td class="num" x-text="fmt(p.model_prob*100,1) + '%'"></td>
-                          <td class="num muted" x-text="fmt(p.market_fair_prob*100,1) + '%'"></td>
-                          <td class="num edge-num" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
-                          <td><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
+                          <td data-label="Market / Side" x-text="pickSideLine(p)"></td>
+                          <td class="num" data-label="Odds" x-text="fmt(p.market_odds,2)"></td>
+                          <td class="num" data-label="Model Prob" x-text="fmt(p.model_prob*100,1) + '%'"></td>
+                          <td class="num muted" data-label="Market Fair Prob" x-text="fmt(p.market_fair_prob*100,1) + '%'"></td>
+                          <td class="num edge-num" data-label="Edge %" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
+                          <td data-label="Confidence"><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
                         </tr>
                       </template>
                     </tbody>
@@ -166,14 +166,14 @@
                       </div>
                     </div>
                     <div class="table-scroll">
-                      <table class="data-table">
+                      <table class="data-table data-table-cards">
                         <thead><tr><th>Game</th><th>Market / Side</th><th class="num">Odds</th></tr></thead>
                         <tbody>
                           <template x-for="(l, li) in pl.legs" :key="li">
                             <tr>
-                              <td x-text="l.game_label"></td>
-                              <td x-text="marketLabel(l.market) + ' ' + sideLabel(l) + lineDisplay(l)"></td>
-                              <td class="num" x-text="fmt(l.market_odds,2)"></td>
+                              <td data-label="Game" x-text="l.game_label"></td>
+                              <td data-label="Market / Side" x-text="marketLabel(l.market) + ' ' + sideLabel(l) + lineDisplay(l)"></td>
+                              <td class="num" data-label="Odds" x-text="fmt(l.market_odds,2)"></td>
                             </tr>
                           </template>
                         </tbody>
@@ -229,7 +229,7 @@
               <div class="mb-20">
                 <div class="section-divider" x-text="sp"></div>
                 <div class="card table-scroll">
-                  <table class="data-table">
+                  <table class="data-table data-table-cards">
                     <thead>
                       <tr>
                         <th></th><th>Date</th><th>Matchup</th><th>Market / Side</th>
@@ -240,17 +240,17 @@
                       <template x-for="p in leaguePicks(sp)" :key="legKey(p)">
                         <tr class="selectable-row" :class="{selected: isLegSelected(p)}" @click="toggleLeg(p)">
                           <td><input type="checkbox" :checked="isLegSelected(p)" @click.stop="toggleLeg(p)"></td>
-                          <td class="muted" x-text="fmtDate(p.date)"></td>
-                          <td>
+                          <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
+                          <td data-label="Matchup">
                             <div class="matchup">
                               <span class="away" x-text="p.away_team"></span>
                               <span class="home" x-text="p.home_team"></span>
                             </div>
                           </td>
-                          <td x-text="pickSideLine(p)"></td>
-                          <td class="num" x-text="fmt(p.market_odds,2)"></td>
-                          <td class="num edge-num" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
-                          <td><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
+                          <td data-label="Market / Side" x-text="pickSideLine(p)"></td>
+                          <td class="num" data-label="Odds" x-text="fmt(p.market_odds,2)"></td>
+                          <td class="num edge-num" data-label="Edge %" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
+                          <td data-label="Confidence"><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
                         </tr>
                       </template>
                     </tbody>
@@ -429,17 +429,17 @@
                     </template>
 
                     <div class="table-scroll mt-16">
-                      <table class="data-table">
+                      <table class="data-table data-table-cards">
                         <thead><tr><th>Logged</th><th>Legs</th><th class="num">Odds</th><th class="num">Edge %</th><th>Result</th><th class="num">Profit (u)</th></tr></thead>
                         <tbody>
                           <template x-for="p in sortedForwardParlays()" :key="p.id">
                             <tr>
-                              <td class="muted" x-text="fmtDate(p.snapshotted_at)"></td>
-                              <td x-text="parlayLegSummary(p)"></td>
-                              <td class="num" x-text="fmt(p.combined_decimal_odds,2)"></td>
-                              <td class="num edge-num" x-text="p.edge_pct != null ? '+' + fmt(p.edge_pct,1) + '%' : '—'"></td>
-                              <td><span class="result-badge" :class="p.settled ? (['win','loss','push'].includes(p.result) ? p.result : 'pending') : 'pending'" x-text="p.settled ? ({win:'Win',loss:'Loss',push:'Push'}[p.result] || 'Pending') : 'Pending'"></span></td>
-                              <td class="num" :class="p.profit_units == null ? '' : (p.profit_units < 0 ? 'num-neg' : 'num-pos')" x-text="p.profit_units != null ? fmt(p.profit_units,2) : '—'"></td>
+                              <td class="muted" data-label="Logged" x-text="fmtDate(p.snapshotted_at)"></td>
+                              <td data-label="Legs" x-text="parlayLegSummary(p)"></td>
+                              <td class="num" data-label="Odds" x-text="fmt(p.combined_decimal_odds,2)"></td>
+                              <td class="num edge-num" data-label="Edge %" x-text="p.edge_pct != null ? '+' + fmt(p.edge_pct,1) + '%' : '—'"></td>
+                              <td data-label="Result"><span class="result-badge" :class="p.settled ? (['win','loss','push'].includes(p.result) ? p.result : 'pending') : 'pending'" x-text="p.settled ? ({win:'Win',loss:'Loss',push:'Push'}[p.result] || 'Pending') : 'Pending'"></span></td>
+                              <td class="num" data-label="Profit (u)" :class="p.profit_units == null ? '' : (p.profit_units < 0 ? 'num-neg' : 'num-pos')" x-text="p.profit_units != null ? fmt(p.profit_units,2) : '—'"></td>
                             </tr>
                           </template>
                         </tbody>
@@ -500,7 +500,7 @@
                     </template>
 
                     <div class="card table-scroll">
-                      <table class="data-table">
+                      <table class="data-table data-table-cards">
                         <thead>
                           <tr>
                             <th>Date</th><th>Matchup</th><th>Market / Side</th>
@@ -511,19 +511,19 @@
                         <tbody>
                           <template x-for="p in sortedForwardPicks(sp)" :key="p.id">
                             <tr>
-                              <td class="muted" x-text="fmtDate(p.date)"></td>
-                              <td>
+                              <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
+                              <td data-label="Matchup">
                                 <div class="matchup">
                                   <span class="away" x-text="p.away_team"></span>
                                   <span class="home" x-text="p.home_team"></span>
                                 </div>
                               </td>
-                              <td x-text="marketLabel(p.market) + ' ' + sideLabel(p) + lineDisplay(p)"></td>
-                              <td class="num" x-text="fmt(p.market_odds,2)"></td>
-                              <td class="num edge-num" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
-                              <td><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
-                              <td><span class="result-badge" :class="forwardResultClass(p)" x-text="forwardResultLabel(p)"></span></td>
-                              <td class="num" :class="p.clv_pct == null ? '' : (p.clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="p.clv_pct != null ? fmt(p.clv_pct,2) : '—'"></td>
+                              <td data-label="Market / Side" x-text="marketLabel(p.market) + ' ' + sideLabel(p) + lineDisplay(p)"></td>
+                              <td class="num" data-label="Odds" x-text="fmt(p.market_odds,2)"></td>
+                              <td class="num edge-num" data-label="Edge %" x-text="'+' + fmt(p.edge_pct,1) + '%'"></td>
+                              <td data-label="Confidence"><span class="conf-badge" :class="'conf-' + p.confidence" x-text="p.confidence"></span></td>
+                              <td data-label="Result"><span class="result-badge" :class="forwardResultClass(p)" x-text="forwardResultLabel(p)"></span></td>
+                              <td class="num" data-label="CLV %" :class="p.clv_pct == null ? '' : (p.clv_pct < 0 ? 'num-neg' : 'num-pos')" x-text="p.clv_pct != null ? fmt(p.clv_pct,2) : '—'"></td>
                             </tr>
                           </template>
                         </tbody>

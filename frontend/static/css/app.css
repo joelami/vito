@@ -560,7 +560,73 @@ select.form-control {
   .opp-row { grid-template-columns: 70px 1fr 60px 70px; }
   .opp-row .num:nth-child(5), .opp-row .num:nth-child(6) { display: none; }
 }
+
+/* ── Phone layout (≤640px covers every iPhone in portrait, from SE to
+   Pro Max — landscape/tablet widths sit above this and keep the desktop
+   table layout unchanged) ─────────────────────────────────────────────
+   The one real problem worth solving here isn't "things are a bit
+   cramped" — it's that this app's dense data-tables (7-8 columns:
+   date/matchup/market/odds/probabilities/edge/confidence) are unreadable
+   sideways-scrolled on a phone: a viewer can see one or two columns at a
+   time and has no way to correlate them back to a row. The fix isn't a
+   smaller font — it's not forcing a table layout onto a phone at all.
+   `.data-table-cards` (opt-in per table below, only on the genuinely wide
+   ones — short 3-5 column tables like Ratings or the by-market/by-league
+   summaries stay real tables, since those already fit or scroll fine)
+   turns each row into its own bordered card: the header row hides, and
+   each cell becomes a label/value line using its own <th> text via
+   `attr(data-label)` — no JS, no duplicated markup, the exact same DOM
+   Alpine already renders. */
 @media (max-width: 640px) {
   .brand span.tag { display: none; }
   .nav-tab { padding: 0 10px; font-size: 9.5px; }
+
+  .page-header, .page-content { padding-left: 12px; padding-right: 12px; }
+  .page-header { padding-top: 20px; }
+  .page-title { font-size: 24px; }
+  .page-subtitle { font-size: 11px; margin-bottom: 16px; }
+
+  .stat-card { padding: 16px 14px; gap: 6px; }
+  .stat-card-value { font-size: 28px; }
+  .card-body { padding: 14px; }
+
+  .data-table-cards { white-space: normal; }
+  .data-table-cards thead { display: none; }
+  .data-table-cards, .data-table-cards tbody { display: block; width: 100%; }
+  .data-table-cards tr {
+    display: block;
+    border-bottom: 6px solid var(--bg); /* thick paper gap between cards, not a table rule */
+    padding: 12px 14px;
+  }
+  .data-table-cards tr:last-child { border-bottom: none; }
+  .data-table-cards td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    text-align: right;
+    white-space: normal;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .data-table-cards tr td:last-child { border-bottom: none; }
+  .data-table-cards td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    text-align: left;
+    font-weight: 700;
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 1px;
+  }
+  /* A cell with no data-label (e.g. a checkbox column) drops the label
+     row and just centers its content — nothing to name it after. */
+  .data-table-cards td:not([data-label]) { justify-content: center; }
+  /* The matchup block reads left-to-right (away @ home) inside a card
+     the same as it does in the desktop table — only the outer td flips
+     to a label/value row, not this inner block. */
+  .data-table-cards td .matchup { align-items: flex-end; }
+  .data-table-cards td .probable-line { text-align: right; }
 }

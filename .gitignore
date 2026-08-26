@@ -20,3 +20,4 @@ decision_log.jsonl
 # free Open-Meteo API, no reason to ship a stale local cache.
 backend/sports/nfl/weather_cache.csv
 Bug Reporting/
+vito-screenshots/
