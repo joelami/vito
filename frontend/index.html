@@ -50,6 +50,12 @@
 
       <template x-if="!suggestions.loading && suggestions.data">
         <div>
+          <template x-if="suggestions.data.is_stale">
+            <div class="stale-banner">
+              <strong>⚠ Data looks stale.</strong> The sync pipeline that pulls real games/odds and logs new picks hasn't run since <strong x-text="fmtDate(suggestions.data.most_recent_sync_at)"></strong> — everything below is a real snapshot, just an old one. This isn't "nothing qualifies today"; it means the scheduled sync itself appears to have stopped. Check that <code>ENABLE_SCHEDULER=1</code> is still set on the deployment, or trigger a run manually via <code>POST /api/admin/run-harness</code>.
+            </div>
+          </template>
+
           <div class="stat-cards mb-20">
             <div class="stat-card">
               <div class="stat-card-label">Live Suggestions</div>

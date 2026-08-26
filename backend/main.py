@@ -609,6 +609,28 @@ def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 5, parlays_per
             "last_synced_at": last_synced_by_sport.get(sport),
         }
 
+    # Real incident this closes: the in-process scheduler (scheduler.py)
+    # silently stopped running for a week straight (ENABLE_SCHEDULER got
+    # dropped from Railway's env at some point) and nothing surfaced that —
+    # the page just quietly kept showing a week-old snapshot as if it were
+    # current. Per-sport last_synced_at (above) already existed, but a
+    # viewer has to notice a stale DATE themselves; this makes "the sync
+    # pipeline appears to be down" an explicit, computed signal instead.
+    # STALE_THRESHOLD_HOURS is deliberately generous (2x the 12-hour
+    # full-run/sync-only cadence) so a normal brief delay never false-alarms.
+    # Only sports with ANY sync history are considered — a genuinely
+    # off-season sport with zero rows ever isn't "stale," it's just off.
+    known_sync_times = [v for v in last_synced_by_sport.values() if v]
+    most_recent_sync = max(known_sync_times) if known_sync_times else None
+    STALE_THRESHOLD_HOURS = 30
+    is_stale = False
+    if most_recent_sync:
+        try:
+            last_dt = datetime.strptime(most_recent_sync, "%Y-%m-%d %H:%M:%S")
+            is_stale = (datetime.utcnow() - last_dt).total_seconds() > STALE_THRESHOLD_HOURS * 3600
+        except ValueError:
+            pass  # unexpected timestamp format — fail open (not stale) rather than crash the route
+
     top_picks = sorted(all_pending, key=lambda p: p["edge_pct"], reverse=True)[:top_n]
 
     # Parlay pool: one ParlayLeg per pending pick, game_key namespaced by
@@ -655,6 +677,8 @@ def get_daily_suggestions(top_n: int = 20, max_parlay_legs: int = 5, parlays_per
         "sports": by_sport,
         "top_picks": top_picks,
         "parlays": suggested_parlays,
+        "most_recent_sync_at": most_recent_sync,
+        "is_stale": is_stale,
     }
 
 
