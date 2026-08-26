@@ -12,8 +12,23 @@ spacing — re-running it on every server boot and every harness invocation
 would be both slow and an unnecessary hammer on a free public API. Only
 game_ids missing from the cache (i.e. new games added since the last run)
 trigger a real fetch.
+
+CACHE_PATH resolves the same way DB_PATH does (database.py) — an optional
+env var, defaulting to a local sibling-of-this-file path. Real bug this
+fixes, confirmed directly against a real Railway boot: the old hardcoded
+in-repo path was never on the persistent Volume (only DB_PATH/Datasets
+were), so every redeploy started with an empty cache and re-fetched the
+ENTIRE 5,431-game historical archive from scratch — not "no NFL games are
+live so why fetch weather," but a full historical re-fetch needed for
+model TRAINING features, repeated on every single boot. That's real,
+avoidable time (~10 minutes, rate-limited 429s) and resource churn during
+the highest-risk window of startup. Setting WEATHER_CACHE_PATH to a path on
+the same Volume as DB_PATH (e.g. /data/weather_cache.csv) makes this a
+one-time cost, ever, matching the discipline this module's own docstring
+already describes but the path never actually delivered on.
 """
 
+import os
 import time
 from pathlib import Path
 
@@ -26,7 +41,7 @@ NEUTRAL_TEMP_F = 70.0
 NEUTRAL_WIND_MPH = 0.0
 NEUTRAL_PRECIP_MM = 0.0
 
-CACHE_PATH = Path(__file__).parent / "weather_cache.csv"
+CACHE_PATH = Path(os.environ.get("WEATHER_CACHE_PATH", Path(__file__).parent / "weather_cache.csv"))
 CACHE_COLS = ["game_id", "is_dome", "game_temp_f", "game_wind_mph", "game_precip_mm"]
 
 
@@ -47,6 +62,7 @@ def attach_weather(games: pd.DataFrame) -> pd.DataFrame:
         new_rows = _fetch_weather_rows(to_fetch)
         if not new_rows.empty:
             combined = pd.concat([cache, new_rows], ignore_index=True)
+            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             combined.to_csv(CACHE_PATH, index=False)
             print(f"[weather] fetched {len(new_rows)} new game(s), cache now has {len(combined)} entries")
 

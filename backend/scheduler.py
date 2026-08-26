@@ -56,10 +56,23 @@ def _run_parlays(snapshot_new: bool):
         print(f"[scheduler] parlay snapshot/settle FAILED: {e}")
 
 
-def _run_full():
+def _run_full(pipelines: dict = None):
+    """
+    `pipelines`, if given, is passed through to `harness.run()` so it
+    reuses an already-built pipeline instead of rebuilding one from
+    scratch (see `harness.run()`'s own docstring for the OOM this fixes).
+    Only ever safe to pass on the ONE-TIME immediate boot-time call in
+    `_loop()` below, where the pipeline was built moments ago by main.py's
+    own startup and is guaranteed current — every SCHEDULED call (the
+    actual 09:00/21:00 UTC timer, not the boot-time kickoff) must keep
+    rebuilding fresh, or the model would silently stop retraining on newly
+    synced results after the very first boot, which would be a far worse
+    bug than the memory this reuse saves. Callers pass `pipelines=None`
+    for every case except that one boot-time call.
+    """
     for sport in LIVE_SPORTS:
         try:
-            harness.run(sport)
+            harness.run(sport, pipeline=(pipelines or {}).get(sport))
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
     _run_parlays(snapshot_new=True)
@@ -75,7 +88,7 @@ def _run_sync_only():
     _run_parlays(snapshot_new=False)
 
 
-def _loop():
+def _loop(boot_pipelines: dict = None):
     print(f"[scheduler] in-process scheduler started -- full run at {FULL_RUN_AT} UTC, "
           f"sync-only at {SYNC_ONLY_AT} UTC")
 
@@ -85,9 +98,21 @@ def _loop():
     # (snapshot_new_picks/settle_finished_picks are both safe to re-run --
     # see harness.py), so there's no real cost to an extra boot-time pass
     # beyond the CPU it uses.
+    #
+    # This ONE call reuses main.py's already-built pipelines
+    # (boot_pipelines) instead of asking harness.run() to rebuild every
+    # sport from scratch a second time -- real fix for a real production
+    # OOM crash, confirmed right after CFB (a 5th sport) pushed peak
+    # post-boot memory over the edge (two full copies of every sport's
+    # model transiently resident: main.py's fresh ones plus a second set
+    # harness.run() used to build independently). Every OTHER call to
+    # _run_full() below (the actual scheduled 09:00/21:00 UTC timer) still
+    # rebuilds fresh -- see _run_full()'s own docstring for why that's
+    # required, not optional.
     today = datetime.now(timezone.utc).date()
-    print("[scheduler] running an immediate full pass on boot")
-    _run_full()
+    print("[scheduler] running an immediate full pass on boot" +
+          (" (reusing main.py's already-built pipelines)" if boot_pipelines else ""))
+    _run_full(pipelines=boot_pipelines)
     last_full_run_date = today
     last_sync_run_date = None
 
@@ -106,12 +131,19 @@ def _loop():
         time.sleep(_CHECK_INTERVAL_S)
 
 
-def start_background_scheduler():
-    """Call once from main.py's startup. No-op unless ENABLE_SCHEDULER=1 --
-    see this module's docstring for why that's opt-in rather than automatic."""
+def start_background_scheduler(boot_pipelines: dict = None):
+    """
+    Call once from main.py's startup, passing `_data["pipelines"]` (the
+    dict already built by main.py's own startup, keyed by sport) so the
+    immediate boot-time harness pass (see `_loop()`) can reuse it instead
+    of rebuilding every sport from scratch a second time -- see `_loop()`'s
+    own docstring for the real OOM crash this fixes. No-op unless
+    ENABLE_SCHEDULER=1 -- see this module's docstring for why that's
+    opt-in rather than automatic.
+    """
     if os.environ.get("ENABLE_SCHEDULER") != "1":
         print("[scheduler] ENABLE_SCHEDULER not set to 1 -- in-process harness scheduling disabled "
               "(expected for local dev, which uses launchd instead; see docs/DEPLOYMENT.md).")
         return
-    thread = threading.Thread(target=_loop, daemon=True, name="harness-scheduler")
+    thread = threading.Thread(target=_loop, args=(boot_pipelines,), daemon=True, name="harness-scheduler")
     thread.start()

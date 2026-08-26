@@ -100,7 +100,7 @@ def startup():
     # during that already-slow window. No-op locally / anywhere
     # ENABLE_SCHEDULER isn't set to "1" — see scheduler.py's docstring.
     from scheduler import start_background_scheduler
-    start_background_scheduler()
+    start_background_scheduler(boot_pipelines=_data["pipelines"])
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +184,27 @@ def get_ratings(sport: str = "NFL"):
         games_played = pd.concat([games_df["home_franchise"], games_df["away_franchise"]]).value_counts()
         ranked = [(team, rating) for team, rating in ranked if games_played.get(team, 0) >= min_games]
 
+    # Optional per-sport "team storylines" — short, factual preseason context
+    # (coaching changes, transfers, records), currently only CFB (see
+    # sports/cfb/team_storylines.py's module docstring for the real
+    # copyright-reproduction reasoning behind how these were built —
+    # extracted facts only, independently reworded, never the article's
+    # numeric rank). Same optional-module convention as odds_loader/
+    # starting_pitcher in pipeline.py — a sport with none just gets None
+    # back for every team, no crash. Looked up by the RAW franchise key
+    # (before latest_names display remapping below), since that's what
+    # team_storylines.py's dict is keyed on.
+    try:
+        storylines_mod = importlib.import_module(f"sports.{sport.lower()}.team_storylines")
+        storylines = getattr(storylines_mod, "TEAM_STORYLINES", {})
+    except ModuleNotFoundError:
+        storylines = {}
+
     return [
-        {"rank": i + 1, "team": pipeline["latest_names"].get(team, team), "rating": round(rating, 1)}
+        {
+            "rank": i + 1, "team": pipeline["latest_names"].get(team, team), "rating": round(rating, 1),
+            "storyline": storylines.get(team),
+        }
         for i, (team, rating) in enumerate(ranked)
     ]
 

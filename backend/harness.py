@@ -376,14 +376,36 @@ def print_report(sport: str = "NFL"):
         print("          no settled picks yet — check back once this week's games finish.")
 
 
-def run(sport: str = "NFL"):
+def run(sport: str = "NFL", pipeline: dict = None):
+    """
+    `pipeline`, if given, skips this run's own `_build_pipeline(sport)` call
+    and reuses the caller's already-built one instead. Real reason this
+    matters, not just an optimization for its own sake: `scheduler.py`'s
+    in-process boot-time pass used to call this with no pipeline, so it
+    independently rebuilt every sport's FULL walk-forward pipeline a SECOND
+    time, moments after `main.py`'s own startup had already built the exact
+    same thing — two complete copies of every sport's model transiently
+    resident in memory during the single riskiest window of the app's
+    lifetime (right after boot). Confirmed as a real contributor, not
+    hypothesized, after a production OOM crash right after CFB (a 5th
+    sport) was added. `python3 harness.py` from the CLI still has nothing
+    to reuse, so it naturally falls back to building its own — this stays
+    a pure optimization for that path, not a behavior change.
+    """
     run_started_at = datetime.now()
     print(f"[harness] run started {run_started_at:%Y-%m-%d %H:%M:%S} for {sport}")
     trace = RunTrace(run_name=f"harness_{sport.lower()}")
     database.init_db()
 
-    with trace.step("build_pipeline", sport=sport):
-        pipeline = _build_pipeline(sport)
+    if pipeline is None:
+        with trace.step("build_pipeline", sport=sport):
+            pipeline = _build_pipeline(sport)
+    else:
+        # Same shape RunTrace.step() itself appends (see versioning.py) --
+        # duration 0 since no build actually ran, reused_caller_pipeline is
+        # the honest signal for anyone reading a trace file later.
+        trace.steps.append({"step": "build_pipeline", "duration_s": 0.0,
+                             "details": {"sport": sport, "reused_caller_pipeline": True}, "error": None})
 
     with trace.step("sync_espn", sport=sport) as _:
         events = sync_espn_games(sport)
