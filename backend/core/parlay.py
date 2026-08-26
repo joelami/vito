@@ -137,7 +137,7 @@ def _theme(legs: list) -> str:
 
 def suggest_parlays(available_legs: list, max_legs: int = 4, top_n: int = 10,
                      min_leg_edge_pct: float = 3.0, min_confidence: tuple = ("Medium", "High"),
-                     kelly_frac: float = 0.25) -> list:
+                     kelly_frac: float = 0.25, max_pool_size: int = 20) -> list:
     """
     Builds and ranks candidate parlays from a pool of individual
     opportunities (typically everything on the Dashboard / Suggestions
@@ -153,6 +153,24 @@ def suggest_parlays(available_legs: list, max_legs: int = 4, top_n: int = 10,
     parlay anyway per the rule above, so there's no honest use for keeping
     the runner-up). From that reduced pool, every combination of size 2 to
     `max_legs` is evaluated and ranked by edge_pct.
+
+    `max_pool_size` caps the one-leg-per-game pool to the top N by edge_pct
+    BEFORE running combinations — a real, load-bearing safety limit, not a
+    minor tuning knob. C(n, k) explodes fast: confirmed directly (not
+    guessed) that a real live day with CFB added on top of the other sports
+    produced an 87-game qualifying pool, and summing C(87,2..5) is
+    39,285,488 combinations -- every one of them constructing a real
+    build_parlay() result. That hung the live server (`/api/suggestions/
+    daily` never returning) AND, via harness.py's snapshot_new_parlays()
+    (same function, same default), is a serious candidate for having
+    contributed to the same-day production OOM crash on Railway, since it
+    runs unattended on every scheduled harness pass. Capping the pool to
+    the strongest 20 individual edges bounds the absolute worst case at
+    sum(C(20,2..5)) = 21,699 combinations regardless of how many games are
+    live on a given day, and doesn't change the actual output for any pool
+    that was already under the cap (every case this was tested against
+    before CFB went live) -- it only ever discards legs whose individual
+    edge was already too weak to plausibly place in the final top-N anyway.
     """
     qualifying = [l for l in available_legs if l.model_prob is not None
                   and (l.confidence is None or l.confidence in min_confidence)]
@@ -170,6 +188,10 @@ def suggest_parlays(available_legs: list, max_legs: int = 4, top_n: int = 10,
     pool = list(best_per_game.values())
     if len(pool) < 2:
         return []
+
+    if len(pool) > max_pool_size:
+        pool.sort(key=lambda l: (l.model_prob - l.market_fair_prob), reverse=True)
+        pool = pool[:max_pool_size]
 
     candidates = []
     max_k = min(max_legs, len(pool))
