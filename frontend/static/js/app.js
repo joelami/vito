@@ -436,9 +436,10 @@ function app() {
     // doing" lives — the cross-league summary (loadLiveRecord, above) plus
     // a per-league breakdown, one section per sport, each league's own
     // model kept fully separate the same way it is everywhere else in
-    // this app. CFB excluded — it's never live-synced (ratings-only, see
-    // core/dispatch.py's LIVE_SPORTS), so it would only ever show empty.
-    liveSports: ['NFL', 'MLB', 'NBA', 'NHL'],
+    // this app. Mirrors core/dispatch.py's LIVE_SPORTS exactly (CFB
+    // included as of 2026-08-25 — see that list's own comment for the
+    // real, documented backtest caveat that still applies to it).
+    liveSports: ['NFL', 'MLB', 'NBA', 'NHL', 'CFB'],
 
     async loadForwardTrack() {
       this.livetrack.loading = true;

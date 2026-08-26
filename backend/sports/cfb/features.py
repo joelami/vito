@@ -413,3 +413,34 @@ ML_FEATURE_COLS = [
     # decision_log.jsonl and this module's docstring.
     "season_week_adj",
 ]
+
+
+def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_playoff=False, **_ignored) -> dict:
+    """
+    Live-scoring counterpart for CFB going live (see core/dispatch.py's
+    LIVE_SPORTS comment, 2026-08-25). Honest split, not a blanket fix:
+
+    is_bowl: real, computable now. Same season_type==3 postseason
+    convention this dataset's own is_bowl_game() uses (see config.py) is
+    exactly what ESPN's own is_playoff already means for a live-synced
+    event (see core/espn_client.py's season_type parsing) -- so it's a
+    direct alias, not a fallback.
+
+    season_week_adj, home/away_yards_l10, home/away_int_thrown_l10,
+    home/away_comp_pct_l10 (and their _diff variants): NOT fixed here.
+    These are real, hypothesis-tested, adopted features (see
+    decision_log.jsonl) that this hook could theoretically supply, but
+    doing so honestly needs real plumbing this pass didn't build:
+    season_week_adj needs ESPN's real week.number threaded through
+    espn_client.parse_events -> harness.py's two sync call sites ->
+    core/dispatch.py -> here (a live-scoring signature change spanning
+    every sport, not just CFB); the box-score-derived features need a
+    live box-score data source that doesn't exist in this codebase at
+    all yet (espn_client only ever pulled scoreboard/odds, never
+    per-game stat lines). Both flagged by core/matchup.py's own
+    missing-feature warning rather than silently guessed at under time
+    pressure right after this exact bug class was found and fixed twice
+    elsewhere today -- a real, accepted gap, tracked here, not a
+    forgotten one.
+    """
+    return {"is_bowl": int(bool(is_playoff))}

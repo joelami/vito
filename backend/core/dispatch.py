@@ -14,9 +14,20 @@ from core import matchup as generic_matchup
 from sports.nfl.matchup import score_matchup as score_matchup_nfl
 
 # Every sport with a live ESPN scoreboard feed and a real backtested model
-# behind it. CFB deliberately excluded — same off-season/no-live-wiring
-# decision documented in pipeline.py's build_pipeline() docstring.
-LIVE_SPORTS = ["NFL", "MLB", "NBA", "NHL"]
+# behind it. CFB added 2026-08-25 at the app owner's explicit request, going
+# in with eyes open on a real, documented caveat: unlike NFL/MLB/NBA/NHL,
+# CFB's historical backtest is statistically inconclusive (-0.58% ROI ±
+# 2.53% standard error — the data can't distinguish this model from having
+# no edge at all — see docs/METHODOLOGY.md's NCAAF section), because the
+# historical odds coverage is sparse/short-window and spreads/totals are a
+# flat assumed -110/-110 rather than real two-sided market prices (CLV is
+# therefore not meaningful for CFB the way it is for the other sports here).
+# CFB suggestions/parlays/forward-test now work identically to every other
+# live sport — same edge-finding, same confidence badges, same UI — but
+# that backtest caveat is real and doesn't go away just because it's wired
+# in; it's on the app owner's record as a known, accepted tradeoff, not a
+# claim that CFB predictions are as trustworthy as NFL/MLB's.
+LIVE_SPORTS = ["NFL", "MLB", "NBA", "NHL", "CFB"]
 
 
 def build_pipeline(sport: str, persist_backtest: bool = False) -> dict:

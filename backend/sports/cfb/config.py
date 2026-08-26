@@ -113,6 +113,23 @@ def canonical_team(display_name: str) -> str:
     return display_name
 
 
+# canonical_franchise: required by core/live_results.py to resolve a live,
+# ESPN-synced game back onto this sport's own franchise keys (see
+# core/matchup.py and every other sport's config.py for the same
+# convention). A real identity alias, not a stub -- verified directly, not
+# assumed: pulled every team ESPN's live CFB scoreboard returned on a real
+# game day and checked each `displayName` string against this dataset's own
+# home_franchise/away_franchise values. 48 of 49 matched exactly (the one
+# miss, "Utah Tech Trailblazers", is a program with no games in this
+# dataset at all -- a legitimate brand-new team, not a naming mismatch;
+# gets the same fresh-Elo-start every other sport already gives a team's
+# true first appearance). `canonical_team` already IS a passthrough on
+# ESPN's own kind of display-name string (see its docstring above), so no
+# separate mapping is needed here.
+def canonical_franchise(espn_display_name: str) -> str:
+    return canonical_team(espn_display_name)
+
+
 # ---------- Bowl / postseason & neutral-site approximation ----------
 # The CSV has no explicit "neutral venue" flag (unlike the NFL source file's
 # "Neutral Venue?" column). `season_type == 3` is this dataset's postseason

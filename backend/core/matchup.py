@@ -102,9 +102,12 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
         "is_divisional": False,
     }
 
+    # is_playoff passed through as a kwarg (not a new positional slot) so
+    # MLB's already-shipped extra_matchup_features(home_fr, away_fr,
+    # game_date, home_row, away_row) keeps working unchanged via **kwargs.
     extra_fn = getattr(features, "extra_matchup_features", None)
     if extra_fn:
-        row.update(extra_fn(home_fr, away_fr, game_date, home_row, away_row))
+        row.update(extra_fn(home_fr, away_fr, game_date, home_row, away_row, is_playoff=is_playoff))
 
     # fill anything ML_FEATURE_COLS expects that's still missing with a neutral default --
     # LOUDLY, not silently (see _warned_missing_features' comment above for why).

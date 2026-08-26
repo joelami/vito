@@ -72,13 +72,15 @@ def startup():
     print(f"[startup] NFL: {len(_data['games'])} games loaded, {len(_data['oos_df'])} walk-forward "
           f"predictions, {len(_data['current_ratings'])} teams rated.")
 
-    # Every other live sport (see core/dispatch.py's LIVE_SPORTS) — built the
-    # same way harness.py builds them, kept in a separate per-sport dict
-    # rather than flattened into `_data` so each league's model stays
-    # completely isolated from the others (no shared/overwritten keys). A
-    # sport that fails to build (e.g. missing dataset) is logged and skipped
-    # rather than taking the whole app down — every other tab/sport should
-    # still work.
+    # Every other live sport (see core/dispatch.py's LIVE_SPORTS, including
+    # CFB as of 2026-08-25 — see that list's own comment for the real,
+    # documented backtest caveat that comes with it) — built the same way
+    # harness.py builds them, kept in a separate per-sport dict rather than
+    # flattened into `_data` so each league's model stays completely
+    # isolated from the others (no shared/overwritten keys). A sport that
+    # fails to build (e.g. missing dataset) is logged and skipped rather
+    # than taking the whole app down — every other tab/sport should still
+    # work.
     _data["pipelines"] = {"NFL": nfl_pipeline}
     for sport in LIVE_SPORTS:
         if sport == "NFL":
@@ -90,21 +92,6 @@ def startup():
                   f"predictions, {len(p['current_ratings'])} teams rated.")
         except Exception as e:
             print(f"[startup] {sport} pipeline FAILED to build, skipping: {e}")
-
-    # CFB: ratings-only, deliberately NOT in LIVE_SPORTS — its historical odds
-    # coverage is too sparse/short-window for a trustworthy live edge-finder
-    # (see docs/METHODOLOGY.md's NCAAF section), so it stays out of the ESPN
-    # sync/harness/Suggestions path entirely. The power-rating engine itself
-    # doesn't depend on odds at all though, so there's no reason to withhold
-    # it from Ratings specifically — same pipeline, just never synced live or
-    # exposed anywhere a bet would actually be suggested.
-    try:
-        _data["pipelines"]["CFB"] = build_sport_pipeline("CFB", persist_backtest=False)
-        p = _data["pipelines"]["CFB"]
-        print(f"[startup] CFB: {len(p['games'])} games loaded, {len(p['oos_df'])} walk-forward "
-              f"predictions, {len(p['current_ratings'])} teams rated (ratings-only, not live-synced).")
-    except Exception as e:
-        print(f"[startup] CFB ratings pipeline FAILED to build, skipping: {e}")
 
     # Started last, after every pipeline above is already built — its own
     # immediate boot-time harness pass (see scheduler.py) is a second, full

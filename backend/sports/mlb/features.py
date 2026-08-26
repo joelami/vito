@@ -254,7 +254,7 @@ ML_FEATURE_COLS = [
 ]
 
 
-def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row) -> dict:
+def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, **_ignored) -> dict:
     """
     Live-scoring counterpart to build_features' loader-derived sp_er_lN
     columns above. core/matchup.py (the generic scorer every live MLB pick
