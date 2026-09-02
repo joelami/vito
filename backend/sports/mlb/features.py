@@ -26,9 +26,33 @@ being called before NFL's build_features. `sp_er_diff_lN` is computed here,
 the same "diff" convention as `rest_diff`/`pyth_pct_diff` elsewhere in this
 project. Adopted (adopt_cautiously) via a core.research hypothesis test -
 see research_starting_pitcher.py and decision_log.jsonl.
+
+MARKET-IMPLIED PROBABILITY: `market_fair_home_prob` (devigged home-moneyline
+probability from the 2012-2021 odds archive, 0.5 - "no information" -
+fallback for the ~73% of 1990-2025 history outside that archive's coverage)
+is computed here directly from `games`' own `Home Odds Close`/`Away Odds
+Close` columns (already present after `odds_loader.attach_odds(games)`,
+called before `build_features` in every pipeline that reaches this point -
+same ordering dependency as the starter-quality columns above). Adopted
+(plain "adopt" - a real, noise-floor-clearing statistical fit improvement,
+not just a harmless null) via a core.research hypothesis test - see
+research_moneyline_dog_calibration.py and decision_log.jsonl. Reasoning in
+brief: a real diagnostic found this model is well-calibrated when its pick
+agrees with the market's favored side, but overconfident by ~9 percentage
+points specifically when it disagrees (the market is pricing in real-time
+information - injuries, lineup news, sharp money - this schedule/form-based
+feature set structurally lacks) - letting the ML models see the market's
+own probability directly, instead of only comparing against it after the
+fact at bet-selection time, measurably improved margin_corr (+0.0078, well
+above the 0.005 noise floor) without hurting ROI. This is the SAME 'Close'
+snapshot price `core.edge_finder` already prices every backtested bet
+against for this dataset (its only snapshot - see odds_loader.py) - known
+pre-bet, not future information, so this is not leakage.
 """
 
 import pandas as pd
+
+from core import odds_math
 
 ROLL_WINDOW = 10  # trailing games considered for form stats - same window as NFL/CFB for structural consistency, see module docstring for the tradeoff this implies given MLB's 162-game season
 
@@ -191,6 +215,28 @@ def build_features(games: pd.DataFrame, rating_history: pd.DataFrame) -> pd.Data
     if "home_sp_er_lN" in out.columns and "away_sp_er_lN" in out.columns:
         out["sp_er_diff_lN"] = out["away_sp_er_lN"] - out["home_sp_er_lN"]
 
+    out["market_fair_home_prob"] = market_implied_home_prob(out)
+
+    return out
+
+
+def market_implied_home_prob(games: pd.DataFrame) -> pd.Series:
+    """Devigged home-moneyline probability from `Home Odds Close`/`Away Odds
+    Close` (the 2012-2021 odds archive - see odds_loader.py; this must
+    already be joined onto `games` before build_features is called, same
+    ordering dependency starting_pitcher.attach_starter_quality has). 0.5
+    ("no information") for the ~73% of 1990-2025 history outside that
+    archive's coverage - the honest neutral fallback, not an invented value,
+    same discipline as LEAGUE_AVG_SP_ER_PER_START. See this module's
+    docstring for the hypothesis test that adopted this feature
+    (research_moneyline_dog_calibration.py / decision_log.jsonl)."""
+    has_ml = games["Home Odds Close"].notna() & games["Away Odds Close"].notna() if "Home Odds Close" in games.columns else pd.Series(False, index=games.index)
+    out = pd.Series(0.5, index=games.index, dtype=float)
+    if has_ml.any():
+        fair = games.loc[has_ml].apply(
+            lambda r: odds_math.devig_two_way(r["Home Odds Close"], r["Away Odds Close"]), axis=1
+        )
+        out.loc[has_ml] = [f[0] for f in fair]
     return out
 
 
@@ -251,6 +297,7 @@ ML_FEATURE_COLS = [
     "naive_total", "naive_margin",
     "home_streak", "away_streak", "is_interleague", "is_night",
     "home_sp_er_lN", "away_sp_er_lN", "sp_er_diff_lN",
+    "market_fair_home_prob",
 ]
 
 
@@ -327,5 +374,21 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, **_i
         row["is_night"] = int(local_dt.hour >= NIGHT_GAME_LOCAL_HOUR)
     else:
         row["is_night"] = 0
+
+    # market_fair_home_prob: this hook has no access to the live market odds
+    # core/matchup.py's score_matchup() already holds for this exact game
+    # (it's only merged into the model row AFTER build_matchup_feature_row()
+    # returns, for the edge computation, not before it for prediction -- see
+    # that module's docstring). Wiring the REAL live odds into this feature
+    # would need market_odds threaded through build_matchup_feature_row()'s
+    # signature, a core/matchup.py change with blast radius across every
+    # other sport that shares it -- out of scope for this MLB-only pass.
+    # Falls back to 0.5 ("no information"), the SAME neutral value the
+    # historical pipeline uses for any game outside the 2012-2021 odds
+    # archive's coverage -- avoids exactly the bug already caught twice in
+    # this file's history (sp_er_lN/is_interleague silently defaulting to an
+    # extreme, wrong value via core/matchup.py's generic 0.0/False
+    # fallback). A real, scoped next step, not attempted here.
+    row["market_fair_home_prob"] = 0.5
 
     return row
