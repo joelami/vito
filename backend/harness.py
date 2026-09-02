@@ -156,6 +156,7 @@ def snapshot_new_picks(pipeline: dict, sport: str, events: list) -> int:
             opps = _score_matchup(
                 sport, pipeline, e["home_team"], e["away_team"], e["date"], market_odds,
                 is_playoff=e["is_playoff"], is_neutral_venue=e["is_neutral_venue"], price_point="Open",
+                week=e.get("week"),
             )
             for o in opps:
                 if o.edge_pct < bcfg.min_edge_pct or o.confidence not in bcfg.allowed_confidence:

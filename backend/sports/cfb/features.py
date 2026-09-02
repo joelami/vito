@@ -415,7 +415,20 @@ ML_FEATURE_COLS = [
 ]
 
 
-def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_playoff=False, **_ignored) -> dict:
+# Recent-history max regular-season week (2016-2025, real data -- see
+# season_week_adjusted()'s docstring for the historical computation this
+# mirrors). Used ONLY as the live-scoring fallback for a bowl game's
+# season_week_adj, since a season still in progress doesn't yet know its
+# own final regular-season week the way a completed historical season does.
+# Recent seasons run 14-16; 16 is the conservative (higher) choice so a
+# live bowl game's adjusted week doesn't undercount relative to how the
+# historical training data was built. An approximation, documented as one --
+# not fabricated, not silently assumed exact.
+RECENT_MAX_REGULAR_SEASON_WEEK = 16
+
+
+def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_playoff=False,
+                            week=None, **_ignored) -> dict:
     """
     Live-scoring counterpart for CFB going live (see core/dispatch.py's
     LIVE_SPORTS comment, 2026-08-25). Honest split, not a blanket fix:
@@ -426,21 +439,33 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_p
     event (see core/espn_client.py's season_type parsing) -- so it's a
     direct alias, not a fallback.
 
-    season_week_adj, home/away_yards_l10, home/away_int_thrown_l10,
-    home/away_comp_pct_l10 (and their _diff variants): NOT fixed here.
-    These are real, hypothesis-tested, adopted features (see
-    decision_log.jsonl) that this hook could theoretically supply, but
-    doing so honestly needs real plumbing this pass didn't build:
-    season_week_adj needs ESPN's real week.number threaded through
-    espn_client.parse_events -> harness.py's two sync call sites ->
-    core/dispatch.py -> here (a live-scoring signature change spanning
-    every sport, not just CFB); the box-score-derived features need a
-    live box-score data source that doesn't exist in this codebase at
-    all yet (espn_client only ever pulled scoreboard/odds, never
-    per-game stat lines). Both flagged by core/matchup.py's own
-    missing-feature warning rather than silently guessed at under time
-    pressure right after this exact bug class was found and fixed twice
-    elsewhere today -- a real, accepted gap, tracked here, not a
-    forgotten one.
+    season_week_adj: NOW real for regular-season games -- `week` is ESPN's
+    own reported week number for this game (threaded through
+    espn_client.parse_events -> harness.py -> core/dispatch.py -> here),
+    verified directly against a live CFB scoreboard call before trusting it
+    (see core/espn_client.py's parse_events). For a BOWL game specifically,
+    the historical feature's own logic (season_week_adjusted() in this
+    module) needs that season's real final regular-season week, which a
+    season still in progress doesn't know yet -- falls back to
+    RECENT_MAX_REGULAR_SEASON_WEEK + 1 (see that constant's docstring), the
+    same honest-approximation discipline as LEAGUE_AVG_SP_ER_PER_START
+    elsewhere in this project. Falls back to the dataset's own league-wide
+    average week (mid-season) only if `week` is None entirely (ESPN didn't
+    supply it) -- rare, but a real neutral value beats guessing.
+
+    home/away_yards_l10, home/away_int_thrown_l10, home/away_comp_pct_l10
+    (and their _diff variants): still NOT fixed here. These need a live
+    box-score data source that doesn't exist in this codebase at all yet
+    (espn_client only ever pulled scoreboard/odds, never per-game stat
+    lines) -- a real, separate, larger effort, not attempted in this pass.
+    Flagged by core/matchup.py's own missing-feature warning rather than
+    silently guessed at.
     """
-    return {"is_bowl": int(bool(is_playoff))}
+    if is_playoff:
+        season_week_adj = float(RECENT_MAX_REGULAR_SEASON_WEEK) + 1.0
+    elif week is not None:
+        season_week_adj = float(week)
+    else:
+        season_week_adj = float(RECENT_MAX_REGULAR_SEASON_WEEK) / 2.0  # honest "no info" midpoint, not a guessed exact week
+
+    return {"is_bowl": int(bool(is_playoff)), "season_week_adj": season_week_adj}

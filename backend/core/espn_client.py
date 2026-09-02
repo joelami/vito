@@ -301,6 +301,13 @@ def parse_events(raw: dict) -> list:
             "completed": bool(status.get("completed")),
             "status_state": status.get("state"),
             "is_neutral_venue": bool(comp.get("neutralSite")),
+            # Real, confirmed-present field (checked directly against a live
+            # CFB scoreboard call before relying on it) -- currently only
+            # consumed by CFB's season_week_adj live-scoring hook (see
+            # sports/cfb/features.py's extra_matchup_features()). None for
+            # any event where ESPN doesn't supply it rather than a fabricated
+            # default, so a missing value is never mistaken for week 0.
+            "week": ((e.get("week") or {}).get("number")),
         }
         row.update(_parse_odds_block(comp.get("odds")))
         out.append(row)

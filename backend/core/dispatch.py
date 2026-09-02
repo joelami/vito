@@ -37,7 +37,18 @@ def build_pipeline(sport: str, persist_backtest: bool = False) -> dict:
 
 
 def score_matchup(sport: str, pipeline: dict, home_team, away_team, game_date,
-                   market_odds, is_playoff=False, is_neutral_venue=False, price_point="Close"):
+                   market_odds, is_playoff=False, is_neutral_venue=False, price_point="Close",
+                   week=None):
+    """
+    `week`, if given, is the real ESPN-reported week number for this game
+    (see core/espn_client.py's parse_events) -- currently only consumed by
+    CFB's season_week_adj live-scoring hook (sports/cfb/features.py). NOT
+    passed to NFL's dedicated scorer -- NFL's own feature set has no
+    equivalent, and score_matchup_nfl's signature doesn't accept it, so
+    accepting-but-dropping it here (rather than every NFL caller needing to
+    know not to pass it) keeps this dispatcher the one place that decision
+    lives, same principle as this module's own docstring.
+    """
     sport = sport.upper()
     if sport == "NFL":
         return score_matchup_nfl(pipeline, home_team, away_team, game_date, market_odds,
@@ -45,4 +56,4 @@ def score_matchup(sport: str, pipeline: dict, home_team, away_team, game_date,
                                   price_point=price_point)
     return generic_matchup.score_matchup(sport, pipeline, home_team, away_team, game_date, market_odds,
                                           is_playoff=is_playoff, is_neutral_venue=is_neutral_venue,
-                                          price_point=price_point)
+                                          price_point=price_point, week=week)

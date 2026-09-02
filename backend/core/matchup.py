@@ -43,10 +43,15 @@ _warned_missing_features = set()
 
 
 def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_team: str,
-                               game_date, is_playoff: bool = False, is_neutral_venue: bool = False) -> tuple:
+                               game_date, is_playoff: bool = False, is_neutral_venue: bool = False,
+                               week=None) -> tuple:
     """Returns (feature_row_df, home_rating, away_rating, naive_total). Mirrors
     `sports.nfl.matchup.build_matchup_feature_row` but dispatches to whichever
-    sport's config/features module applies."""
+    sport's config/features module applies.
+
+    `week`, if given, is passed through to extra_matchup_features() as a
+    kwarg (see is_playoff's identical treatment below) -- currently only
+    consumed by CFB's season_week_adj hook."""
     config = _sport_module(sport, "config")
     features = _sport_module(sport, "features")
 
@@ -107,7 +112,7 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
     # game_date, home_row, away_row) keeps working unchanged via **kwargs.
     extra_fn = getattr(features, "extra_matchup_features", None)
     if extra_fn:
-        row.update(extra_fn(home_fr, away_fr, game_date, home_row, away_row, is_playoff=is_playoff))
+        row.update(extra_fn(home_fr, away_fr, game_date, home_row, away_row, is_playoff=is_playoff, week=week))
 
     # fill anything ML_FEATURE_COLS expects that's still missing with a neutral default --
     # LOUDLY, not silently (see _warned_missing_features' comment above for why).
@@ -129,7 +134,7 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
 
 def score_matchup(sport: str, pipeline: dict, home_team: str, away_team: str, game_date,
                    market_odds: dict, is_playoff: bool = False, is_neutral_venue: bool = False,
-                   price_point: str = "Close") -> list:
+                   price_point: str = "Close", week=None) -> list:
     """Sport-agnostic version of `sports.nfl.matchup.score_matchup`."""
     from . import edge_finder
 
@@ -137,7 +142,7 @@ def score_matchup(sport: str, pipeline: dict, home_team: str, away_team: str, ga
     features = _sport_module(sport, "features")
 
     feat_row, home_rating, away_rating, naive_total = build_matchup_feature_row(
-        sport, pipeline, home_team, away_team, game_date, is_playoff, is_neutral_venue
+        sport, pipeline, home_team, away_team, game_date, is_playoff, is_neutral_venue, week=week
     )
     pred = pipeline["final_models"].predict(feat_row[features.ML_FEATURE_COLS]).iloc[0]
 
