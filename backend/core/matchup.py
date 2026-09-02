@@ -149,4 +149,4 @@ def score_matchup(sport: str, pipeline: dict, home_team: str, away_team: str, ga
     })
     elo_points_per_margin = config.ELO_POINTS_PER_MARGIN
     return edge_finder.evaluate_game(model_row, pipeline["stds"], elo_points_per_margin,
-                                      pipeline["ensemble_cfg"], price_point=price_point)
+                                      pipeline["ensemble_cfg"], price_point=price_point, sport=sport)

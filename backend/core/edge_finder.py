@@ -52,15 +52,38 @@ def _opportunity(market, side, line, model_prob, market_fair_prob, market_odds,
     )
 
 
+# Sports where market_agreement_confidence_tier (moneyline only -- see
+# core/ensemble.py's docstring) has been directly validated against a real
+# historical backtest and shown to actually separate winners from losers
+# correctly (not backwards). NOT a default-on behavior: checked directly,
+# CFB's moneyline backtest came back CATASTROPHIC under this same tier
+# (24.4% hit rate, -17.5% ROI, n=520) -- almost certainly because CFB's
+# odds coverage is sparse/partly-assumed (see docs/METHODOLOGY.md's NCAAF
+# section), so `market_fair_prob` there often isn't a genuine market read
+# to agree or disagree with. NBA/NHL haven't been checked at all (both
+# off-season, zero live picks, lower urgency) -- they get the OLD
+# confidence_tier() until someone actually validates this for them too.
+# Every sport not in this set keeps the pre-existing submodel-agreement
+# confidence_tier() for moneyline, unchanged.
+MARKET_AGREEMENT_CONFIDENCE_SPORTS = {"NFL", "MLB"}
+
+
 def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float,
                    cfg: ensemble.EnsembleConfig, kelly_frac: float = 0.25,
-                   price_point: str = "Close") -> list:
+                   price_point: str = "Close", sport: str = None) -> list:
     """
     `row` must expose (dict-like or pandas Series) `rating_diff_pre`,
     `predicted_margin`, `predicted_total`, `naive_total`, plus the market
     odds columns for the requested `price_point`.
+
+    `sport`, if given, gates which moneyline confidence function is used
+    (see MARKET_AGREEMENT_CONFIDENCE_SPORTS above) -- defaults to the old,
+    always-safe submodel-agreement confidence_tier() when sport is None or
+    not in that set, so an uncertain/unvalidated caller never silently
+    picks up the new behavior.
     """
     opps = []
+    use_market_agreement = sport is not None and sport.upper() in MARKET_AGREEMENT_CONFIDENCE_SPORTS
 
     def get(col):
         v = row.get(col) if hasattr(row, "get") else row[col]
@@ -72,11 +95,23 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
         fair_home, fair_away = odds_math.devig_two_way(home_ml, away_ml)
         if fair_home is not None:
             ml = ensemble.moneyline_prob(row, stds, elo_points_per_margin, cfg)
-            conf = ensemble.confidence_tier(ml["elo_prob"], ml["ml_prob"])
+            # market_agreement_confidence_tier only for sports where this has
+            # been directly validated (see MARKET_AGREEMENT_CONFIDENCE_SPORTS
+            # above) -- every other sport keeps the old confidence_tier(),
+            # unchanged. Computed PER SIDE, not once per game -- home and
+            # away can (and often do) land in different tiers now, since
+            # this asks "is THIS side the market's favorite or its
+            # underdog," not a game-level abstraction (see that function's
+            # docstring for a real bug this replaced, caught before shipping).
+            if use_market_agreement:
+                conf_home = ensemble.market_agreement_confidence_tier(fair_home)
+                conf_away = ensemble.market_agreement_confidence_tier(fair_away)
+            else:
+                conf_home = conf_away = ensemble.confidence_tier(ml["elo_prob"], ml["ml_prob"])
             opps.append(_opportunity("moneyline", "home", None, ml["blended_prob"],
-                                      fair_home, home_ml, conf, kelly_frac))
+                                      fair_home, home_ml, conf_home, kelly_frac))
             opps.append(_opportunity("moneyline", "away", None, 1.0 - ml["blended_prob"],
-                                      fair_away, away_ml, conf, kelly_frac))
+                                      fair_away, away_ml, conf_away, kelly_frac))
 
     # ---------- Spread ----------
     home_line = get(f"Home Line {price_point}")

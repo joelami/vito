@@ -94,4 +94,4 @@ def score_matchup(pipeline: dict, home_team: str, away_team: str, game_date,
         "naive_total": naive_total,
     })
     return edge_finder.evaluate_game(model_row, pipeline["stds"], nfl_config.ELO_POINTS_PER_MARGIN,
-                                      pipeline["ensemble_cfg"], price_point=price_point)
+                                      pipeline["ensemble_cfg"], price_point=price_point, sport="NFL")

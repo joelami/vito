@@ -78,20 +78,29 @@ def settle_bet(market: str, side: str, line, row) -> int:
 
 
 def run_backtest(oos_df: pd.DataFrame, stds: ensemble.ResidualStds, elo_points_per_margin: float,
-                  ensemble_cfg: ensemble.EnsembleConfig, cfg: BacktestConfig = None) -> pd.DataFrame:
+                  ensemble_cfg: ensemble.EnsembleConfig, cfg: BacktestConfig = None,
+                  sport: str = None) -> pd.DataFrame:
     """
     `oos_df` = walk-forward feature+prediction DataFrame (feats joined with
     ml_models' out-of-sample predictions), one row per game. Returns one row
     per BET PLACED (not per game — a game can produce zero, one, or several
     qualifying bets), with everything needed for the summary tables and the
     bankroll curve.
+
+    `sport`, if given, is passed straight through to edge_finder.evaluate_game()
+    -- gates which moneyline confidence function is used (see edge_finder.py's
+    MARKET_AGREEMENT_CONFIDENCE_SPORTS). Every existing caller that doesn't
+    pass this keeps getting the always-safe old confidence_tier() behavior,
+    unchanged -- this is additive, not a silent behavior change for anyone
+    who hasn't opted in.
     """
     cfg = cfg or BacktestConfig()
     records = []
 
     for game_id, row in oos_df.iterrows():
         opps = edge_finder.evaluate_game(row, stds, elo_points_per_margin, ensemble_cfg,
-                                          kelly_frac=cfg.kelly_frac, price_point=cfg.price_point)
+                                          kelly_frac=cfg.kelly_frac, price_point=cfg.price_point,
+                                          sport=sport)
         for o in opps:
             if o.edge_pct < cfg.min_edge_pct or o.confidence not in cfg.allowed_confidence:
                 continue

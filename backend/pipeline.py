@@ -72,7 +72,7 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     ecfg = ensemble.EnsembleConfig()
     bcfg = backtest.BacktestConfig(min_edge_pct=3.0)
 
-    bets_df = backtest.run_backtest(oos_df, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg, bcfg)
+    bets_df = backtest.run_backtest(oos_df, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg, bcfg, sport="NFL")
     if not bets_df.empty:
         bets_df["edge_bucket"] = bets_df["edge_pct"].apply(backtest.edge_bucket)
     overall = backtest.summarize(bets_df)
@@ -204,7 +204,7 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
     # opportunities every time (confirmed: this was a real bug caught while wiring this up).
     bcfg = backtest.BacktestConfig(min_edge_pct=3.0, price_point="Close")
 
-    bets_df = backtest.run_backtest(oos_df, stds, config.ELO_POINTS_PER_MARGIN, ecfg, bcfg)
+    bets_df = backtest.run_backtest(oos_df, stds, config.ELO_POINTS_PER_MARGIN, ecfg, bcfg, sport=sport)
     if not bets_df.empty:
         bets_df["edge_bucket"] = bets_df["edge_pct"].apply(backtest.edge_bucket)
     overall = backtest.summarize(bets_df)
