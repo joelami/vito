@@ -170,6 +170,7 @@ function app() {
       loading: true,
       data: null,
       mlbProbables: {},   // espn_event_id -> {home, away}
+      leagueFilter: 'ALL', // 'ALL' or a specific league (see leagueOrder) -- which section(s) show below the stat cards
     },
 
     liveRecord: {

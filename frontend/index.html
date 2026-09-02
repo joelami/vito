@@ -42,6 +42,12 @@
     <div class="page-header">
       <div class="page-title">Suggestions of the Day</div>
       <div class="page-subtitle">Every currently-live, already-qualifying edge across every league — each one is a real row the harness snapshotted at the honest opening price in a real, scheduled game (see Live Track Record for how these grade out over time). Grouped by league; every league's model stays fully separate.</div>
+      <div class="league-pills mb-16">
+        <div class="league-pill" :class="{active: suggestions.leagueFilter === 'ALL'}" @click="suggestions.leagueFilter = 'ALL'">All</div>
+        <template x-for="sp in leagueOrder" :key="sp">
+          <div class="league-pill" :class="{active: suggestions.leagueFilter === sp}" @click="suggestions.leagueFilter = sp" x-text="sp + ' (' + leaguePicks(sp).length + ')'"></div>
+        </template>
+      </div>
     </div>
     <div class="page-content">
       <template x-if="suggestions.loading">
@@ -78,8 +84,12 @@
             <div class="empty-state">Nothing qualifies right now — the harness only logs a suggestion once a real, scheduled game clears the same edge/confidence bar as the backtest. Check back once games are on the board.</div>
           </template>
 
+          <template x-if="totalSuggestionCount > 0 && suggestions.leagueFilter !== 'ALL' && leaguePicks(suggestions.leagueFilter).length === 0">
+            <div class="empty-state" x-text="'No live ' + suggestions.leagueFilter + ' suggestions right now — try All, or check back once ' + suggestions.leagueFilter + ' games are on the board.'"></div>
+          </template>
+
           <template x-for="sp in leagueOrder" :key="sp">
-            <template x-if="leaguePicks(sp).length">
+            <template x-if="leaguePicks(sp).length && (suggestions.leagueFilter === 'ALL' || suggestions.leagueFilter === sp)">
               <div class="mb-20">
                 <div class="section-divider">
                   <span x-text="sp + ' — ' + leaguePicks(sp).length + ' live suggestion' + (leaguePicks(sp).length === 1 ? '' : 's')"></span>
