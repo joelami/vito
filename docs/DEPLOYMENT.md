@@ -57,6 +57,8 @@ Without this, `sports_bet.db` — your entire bet log, forward-test track record
 
 Worth doing the same for `Datasets/` too, purely as a speed optimization: mount a second volume at `/app/Datasets` (or wherever the container's working directory lands `Datasets/` — check the first deploy's logs to confirm the exact path `core/dataset_sync.py` resolves to). Without it, every restart re-downloads 7.6GB from R2 before the app can serve a single request; with it, that only happens once, ever.
 
+**A Volume is not a backup.** Real incident, not a hypothetical: on 2026-09-02 this exact Volume was recreated (an infrastructure-level event — deleting and re-adding a Volume in Railway provisions a genuinely new, empty disk, it does not migrate the old one's data) and the entire live forward-test track record was lost with no way back, because the database's only copy ever existed on that one Volume. `core/db_backup.py` now uploads a daily copy of the database to the same R2 bucket `Datasets/` already uses (see `scheduler.py`'s full-run cycle) — set `ENABLE_SCHEDULER=1` (already required for the harness) and the existing `R2_*` variables (already required for `Datasets/`) and this runs automatically, no extra setup. To restore after a future Volume loss: `python3 -m core.db_backup restore` (refuses to overwrite an existing non-empty database without `--force`, since restoring is itself destructive to whatever's currently there).
+
 ## 6. First deploy
 
 Push to `main` (or click Deploy in Railway) and watch the build logs. First boot will take a few minutes — it's downloading 7.6GB from R2 before it can build any sport's model. Look for:
@@ -86,3 +88,4 @@ Tradeoff worth knowing: the harness's model rebuild briefly shares CPU with the 
 - `main.py` reads `$PORT` (was hardcoded to 8010 before — fixed).
 - `database.py`'s `DB_PATH` already reads `$DB_PATH` from the environment, defaulting to a local file for dev — no code change needed, just set the variable.
 - `core/dataset_sync.py` is a no-op if `Datasets/` is already present (local dev, or a populated volume) — safe to leave the call in permanently, it doesn't slow down a normal local run at all.
+- `core/db_backup.py` is a no-op without R2 credentials set (local dev never needs it) — same graceful-skip convention as `dataset_sync.py`.

@@ -77,6 +77,22 @@ def _run_full(pipelines: dict = None):
             print(f"[scheduler] {sport} full run FAILED: {e}")
     _run_parlays(snapshot_new=True)
 
+    # Real incident this closes: on 2026-09-02 the Railway Volume backing
+    # DB_PATH was recreated (confirmed an infrastructure event, not an app
+    # bug) and the ENTIRE forward-test track record -- 140+ settled picks,
+    # the app's actual live betting history -- was lost with no way back,
+    # because the only copy of that data ever existed on that one Volume.
+    # A second, independent copy in R2 (see core/db_backup.py) means a
+    # future Volume-level incident costs at most one day of picks, not the
+    # whole history. Runs once per full-run cycle (including the immediate
+    # boot-time one) -- a caught exception here never blocks anything else,
+    # same pattern as _run_parlays above.
+    try:
+        from core.db_backup import backup_database
+        backup_database()
+    except Exception as e:
+        print(f"[scheduler] database backup FAILED: {e}")
+
 
 def _run_sync_only():
     for sport in LIVE_SPORTS:
