@@ -164,7 +164,10 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
     # pattern as odds_loader above, generalized so a future adopted feature
     # doesn't need this dispatcher edited again as long as it follows the
     # same `attach_*(games) -> games` convention.
-    for extra_module_name, attach_fn_name in [("starting_pitcher", "attach_starter_quality")]:
+    for extra_module_name, attach_fn_name in [
+        ("starting_pitcher", "attach_starter_quality"),
+        ("starter_kbb_quality", "attach_starter_kbb_pct"),
+    ]:
         try:
             extra_module = importlib.import_module(f"sports.{sport}.{extra_module_name}")
             games = getattr(extra_module, attach_fn_name)(games)

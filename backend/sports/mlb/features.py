@@ -48,6 +48,27 @@ above the 0.005 noise floor) without hurting ROI. This is the SAME 'Close'
 snapshot price `core.edge_finder` already prices every backtested bet
 against for this dataset (its only snapshot - see odds_loader.py) - known
 pre-bet, not future information, so this is not leakage.
+
+STARTING PITCHER SKILL (K-BB%): `home_sp_kbb_pct_lN` / `away_sp_kbb_pct_lN`
+(a starter's rolling (K-BB)/batters-faced over their last 8 starts - see
+sports/mlb/starter_kbb_quality.py's module docstring for the exact scoping)
+must already be columns on `games` - call
+`starter_kbb_quality.attach_starter_kbb_pct(games)` before this, same
+ordering dependency as the ER-based starter feature above. A DIFFERENT,
+more skill-isolated metric than home_sp_er_lN/away_sp_er_lN (K-BB% only
+counts outcomes the pitcher himself overwhelmingly controls, stripping out
+defense/ballpark/sequencing-luck noise a runs-allowed proxy can't
+separate from true skill) - built as a genuinely new mechanism, not a
+retest of the ER feature. `sp_kbb_pct_diff_lN` is home minus away (K-BB% is
+a "higher is better" stat, the OPPOSITE polarity from ER's "lower is
+better" - this diff's sign is deliberately flipped from sp_er_diff_lN's
+away-minus-home so that positive still means "favors home" in both
+columns, not a copy-pasted formula that would silently invert the signal).
+Adopted (plain "adopt" - total_corr improved +0.0062, above the 0.005
+noise floor, ROI improved +0.14pp, margin_corr moved -0.0015, within
+noise either way) via a core.research hypothesis test - see
+research_starter_kbb_pct.py and decision_log.jsonl
+("starter_kbb_pct_rolling").
 """
 
 import pandas as pd
@@ -215,6 +236,15 @@ def build_features(games: pd.DataFrame, rating_history: pd.DataFrame) -> pd.Data
     if "home_sp_er_lN" in out.columns and "away_sp_er_lN" in out.columns:
         out["sp_er_diff_lN"] = out["away_sp_er_lN"] - out["home_sp_er_lN"]
 
+    # Starting-pitcher rolling K-BB%: home_sp_kbb_pct_lN/away_sp_kbb_pct_lN
+    # must already be present on `games` (see module docstring - call
+    # starter_kbb_quality.attach_starter_kbb_pct(games) beforehand). K-BB% is
+    # "higher is better", the opposite polarity from sp_er_lN's "lower is
+    # better" - diff is home-minus-away here (not away-minus-home like
+    # sp_er_diff_lN above) so positive still means "favors home" in both.
+    if "home_sp_kbb_pct_lN" in out.columns and "away_sp_kbb_pct_lN" in out.columns:
+        out["sp_kbb_pct_diff_lN"] = out["home_sp_kbb_pct_lN"] - out["away_sp_kbb_pct_lN"]
+
     out["market_fair_home_prob"] = market_implied_home_prob(out)
 
     return out
@@ -297,6 +327,7 @@ ML_FEATURE_COLS = [
     "naive_total", "naive_margin",
     "home_streak", "away_streak", "is_interleague", "is_night",
     "home_sp_er_lN", "away_sp_er_lN", "sp_er_diff_lN",
+    "home_sp_kbb_pct_lN", "away_sp_kbb_pct_lN", "sp_kbb_pct_diff_lN",
     "market_fair_home_prob",
 ]
 
@@ -333,10 +364,20 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, **_i
     trained to see for a missing starter, not an invented one.
     """
     from .starting_pitcher import LEAGUE_AVG_SP_ER_PER_START
+    from .starter_kbb_quality import LEAGUE_AVG_SP_KBB_PCT
     row = {
         "home_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
         "away_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
         "sp_er_diff_lN": 0.0,
+        # Same honest-neutral-fallback discipline as sp_er_lN above, and the
+        # same real bug this hook exists to prevent (see this docstring) --
+        # without it, core/matchup.py's generic fallback would silently fill
+        # both with 0.0, which reads as "this starter has struck out every
+        # batter he's ever walked zero of" (an extreme, wrong outlier), not
+        # "no live signal available."
+        "home_sp_kbb_pct_lN": LEAGUE_AVG_SP_KBB_PCT,
+        "away_sp_kbb_pct_lN": LEAGUE_AVG_SP_KBB_PCT,
+        "sp_kbb_pct_diff_lN": 0.0,
     }
 
     # is_interleague: real, computable now, not a fallback -- both flagged
