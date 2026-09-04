@@ -15,6 +15,7 @@ Datasets/
 logs/
 harness_versions/
 decision_log.jsonl
+subgroup_watchlist.jsonl
 
 # Local weather cache (sports/nfl/weather.py) — rebuilds itself from the
 # free Open-Meteo API, no reason to ship a stale local cache.

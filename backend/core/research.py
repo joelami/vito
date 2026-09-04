@@ -30,10 +30,13 @@ alone:
    multiple-comparisons trap).
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 import versioning
+from . import shrinkage, watchlist
 
 
 @dataclass
@@ -202,6 +205,134 @@ def evaluate_hypothesis(hypothesis: Hypothesis, baseline: dict, variant: dict) -
         experience=experience,
         sport=hypothesis.sport,
     )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Subgroup effects: the middle ground between `evaluate_hypothesis()`'s
+# binary adopt/reject and just discarding a directionally-real-but-thin
+# signal. Real motivating case: the NBA spread investigation found
+# favorite bets outperform underdog bets by 3.16pp ROI, stable in DIRECTION
+# across both season halves (+2.82pp, then +3.54pp) but never reaching the
+# z>=2.5-3 bar every actually-adopted fix in this project has cleared
+# (z~1.34 on the combined sample). Neither "adopt it, ROI went up" (this
+# project's whole discipline exists to prevent exactly that) nor "the
+# number wasn't big enough, forget it" (throws away a real, consistently-
+# signed effect just because the sample is still thin) is the right call --
+# the honest middle is: use shrinkage to say precisely how much this
+# should be trusted GIVEN the evidence so far, log it as a WATCHED effect
+# rather than a done deal, and let it earn full adoption automatically as
+# more live data accumulates and the shrinkage weight rises on its own,
+# rather than a human relaxing the bar to manufacture a "win."
+# ---------------------------------------------------------------------------
+@dataclass
+class SubgroupHypothesisResult:
+    hypothesis: Hypothesis
+    market: str
+    shrinkage: "shrinkage.ShrinkageResult"
+    z_score: float                  # raw (unshrunk) subgroup-vs-rest-of-population gap, in combined stderrs
+    stderr_multiplier: float        # Bonferroni-aware bar this z_score is judged against
+    stable_direction: Optional[bool]  # same-sign effect across the two provided split-halves; None if not supplied
+    recommendation: str             # "adopt" | "watch" | "reject"
+
+    def to_dict(self):
+        return {
+            "name": self.hypothesis.name, "sport": self.hypothesis.sport, "market": self.market,
+            "reasoning": self.hypothesis.reasoning, "shrinkage": self.shrinkage.to_dict(),
+            "z_score": self.z_score, "stderr_multiplier": self.stderr_multiplier,
+            "stable_direction": self.stable_direction, "recommendation": self.recommendation,
+        }
+
+
+def evaluate_subgroup_hypothesis(hypothesis: Hypothesis, market: str, subgroup_metrics: dict,
+                                  rest_metrics: dict, split_half_deltas: tuple = None,
+                                  min_bets: int = 100) -> SubgroupHypothesisResult:
+    """
+    `subgroup_metrics`/`rest_metrics`: {roi_pct, roi_stderr_pct, bets} for
+    the subgroup (e.g. NBA spread favorites) and for the REST of the
+    confidence-blind population (everything NOT in the subgroup) -- never
+    the whole population including the subgroup, which would dilute the
+    comparison and isn't how any prior investigation in this project framed
+    a subgroup split (see decision_log.jsonl's favorite-vs-underdog,
+    home-vs-away, under-vs-over entries: always subgroup vs. its complement).
+
+    `split_half_deltas`, if given: (delta_first_half, delta_second_half),
+    each computed independently as subgroup_roi - rest_roi within that half
+    -- required for anything beyond "reject", matching every prior fix's
+    own bar (stable across a season split-half, not just significant on
+    the pooled sample, which can hide a fluky single stretch).
+
+    Recommendation logic:
+      - "adopt": z-score clears the same Bonferroni-aware bar every other
+        adopted fix has cleared, AND direction didn't flip across halves.
+        Equivalent in strictness to evaluate_hypothesis()'s "adopt".
+      - "watch": doesn't clear the bar yet, but the direction is real and
+        stable (same sign in both halves) and the sample is large enough
+        to not be pure noise (>= min_bets). Logged to the watchlist for
+        automatic re-evaluation as more data accumulates -- NOT wired into
+        live scoring at any partial strength. The `shrinkage.subgroup_weight`
+        this returns IS the honest "how much to trust this today" number;
+        it rises on its own as n grows and stderr shrinks, with zero manual
+        tuning -- that's the actual mechanism for "change the weight as
+        evidence accumulates" instead of a hand-picked dial.
+      - "reject": direction flips across halves, or sample too thin to mean
+        anything -- a real null, not parked for later.
+    """
+    raw_delta = subgroup_metrics["roi_pct"] - rest_metrics["roi_pct"]
+    combined_stderr = math.sqrt(subgroup_metrics["roi_stderr_pct"] ** 2 + rest_metrics["roi_stderr_pct"] ** 2)
+    stderr_mult = bonferroni_stderr_multiplier(tests_run_so_far() + 1)
+    z = raw_delta / combined_stderr if combined_stderr else float("inf")
+    clears_bar = abs(raw_delta) >= combined_stderr * stderr_mult
+
+    stable_direction = None
+    if split_half_deltas is not None:
+        d1, d2 = split_half_deltas
+        stable_direction = (d1 > 0 and d2 > 0) or (d1 < 0 and d2 < 0)
+
+    shrink_result = shrinkage.shrink_toward_baseline(
+        subgroup_effect=subgroup_metrics["roi_pct"], subgroup_stderr=subgroup_metrics["roi_stderr_pct"],
+        n_subgroup=subgroup_metrics["bets"],
+        baseline_effect=rest_metrics["roi_pct"], baseline_stderr=rest_metrics["roi_stderr_pct"],
+        n_baseline=rest_metrics["bets"],
+    )
+
+    enough_sample = subgroup_metrics["bets"] >= min_bets
+    if clears_bar and stable_direction is not False:
+        recommendation = "adopt"
+    elif stable_direction and enough_sample:
+        recommendation = "watch"
+    else:
+        recommendation = "reject"
+
+    result = SubgroupHypothesisResult(
+        hypothesis=hypothesis, market=market, shrinkage=shrink_result, z_score=z,
+        stderr_multiplier=stderr_mult, stable_direction=stable_direction, recommendation=recommendation,
+    )
+
+    experience = (
+        f"subgroup (n={subgroup_metrics['bets']}) ROI {subgroup_metrics['roi_pct']:+.2f}% vs. "
+        f"rest-of-population (n={rest_metrics['bets']}) ROI {rest_metrics['roi_pct']:+.2f}% "
+        f"-- raw delta {raw_delta:+.2f}pp, combined stderr {combined_stderr:.2f}pp, z={z:+.2f} "
+        f"(needs {stderr_mult:.2f} to clear the current Bonferroni bar). "
+        f"Split-half direction: {'stable' if stable_direction else ('flips' if stable_direction is False else 'not checked')}. "
+        f"Shrinkage: subgroup gets {shrink_result.subgroup_weight*100:.0f}% weight, shrunk estimate "
+        f"{shrink_result.shrunk_effect:+.2f}pp. Recommendation: {recommendation}."
+    )
+    versioning.log_decision(
+        decision=f"Subgroup hypothesis test: {hypothesis.name}",
+        reasoning=hypothesis.reasoning,
+        experience=experience,
+        sport=hypothesis.sport,
+    )
+
+    if recommendation == "watch":
+        watchlist.add_or_update(
+            name=hypothesis.name, sport=hypothesis.sport, market=market,
+            shrinkage_dict=shrink_result.to_dict(), z_score=z, stable_direction=stable_direction,
+            note=f"z={z:+.2f}, needs {stderr_mult:.2f}; stable across both season halves; "
+                 f"re-check next research pass with more accumulated data.",
+        )
+
     return result
 
 
