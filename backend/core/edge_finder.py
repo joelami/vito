@@ -102,6 +102,15 @@ SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS = {"NHL"}
 # so there is no problem there to fix and no reason to touch them.
 TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 
+# App-owner decision (2026-09-03), after real investigation found no
+# validated fix for these four (see ensemble.py's unvalidated_confidence_
+# tier() docstring and decision_log.jsonl's honest-null-result entry):
+# showing a proven-backwards High/Medium/Low badge is worse than showing
+# an explicit "we don't know" -- picks still show up (they cleared a real
+# edge threshold), just without a graded confidence claim.
+MONEYLINE_UNVALIDATED_SPORTS = {"NBA"}
+SPREAD_UNVALIDATED_SPORTS = {"NBA", "MLB", "CFB"}
+
 
 def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float,
                    cfg: ensemble.EnsembleConfig, kelly_frac: float = 0.25,
@@ -144,6 +153,8 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
             if use_market_agreement:
                 conf_home = ensemble.market_agreement_confidence_tier(fair_home)
                 conf_away = ensemble.market_agreement_confidence_tier(fair_away)
+            elif sport_u in MONEYLINE_UNVALIDATED_SPORTS:
+                conf_home = conf_away = ensemble.unvalidated_confidence_tier()
             else:
                 conf_home = conf_away = ensemble.confidence_tier(ml["elo_prob"], ml["ml_prob"])
             opps.append(_opportunity("moneyline", "home", None, ml["blended_prob"],
@@ -172,6 +183,8 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
                 edge_away_pct = ((1.0 - sp["blended_prob"]) - fair_away) * 100.0
                 conf_home = ensemble.edge_magnitude_confidence_tier(edge_home_pct)
                 conf_away = ensemble.edge_magnitude_confidence_tier(edge_away_pct)
+            elif sport_u in SPREAD_UNVALIDATED_SPORTS:
+                conf_home = conf_away = ensemble.unvalidated_confidence_tier()
             else:
                 conf_home = conf_away = ensemble.confidence_tier(sp["elo_prob"], sp["ml_prob"])
             opps.append(_opportunity("spread", "home", home_line, sp["blended_prob"],

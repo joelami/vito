@@ -42,7 +42,14 @@ CLOSE_ODDS_COL = {
 @dataclass
 class BacktestConfig:
     min_edge_pct: float = 3.0
-    allowed_confidence: tuple = ("Medium", "High")
+    # "Unvalidated" included alongside Medium/High so the 4 market/sport
+    # combinations gated to ensemble.unvalidated_confidence_tier() (see
+    # edge_finder.py's MONEYLINE_UNVALIDATED_SPORTS/SPREAD_UNVALIDATED_SPORTS)
+    # still qualify as real bets -- an app-owner decision to keep surfacing
+    # these picks (they cleared a real edge threshold) without a graded
+    # confidence claim, not to hide them. Harmless for every other sport/
+    # market, which never produces this value.
+    allowed_confidence: tuple = ("Medium", "High", "Unvalidated")
     kelly_frac: float = 0.25
     starting_bankroll: float = 100.0
     price_point: str = "Open"   # the price a bet is actually placed at

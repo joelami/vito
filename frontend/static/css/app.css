@@ -208,6 +208,14 @@ a { color: inherit; }
 .conf-badge.conf-High { background: var(--conf-high-bg); color: var(--conf-high-fg); border-color: rgba(161,92,46,0.4); }
 .conf-badge.conf-Medium { background: var(--conf-med-bg); color: var(--conf-med-fg); border-color: rgba(150,114,26,0.4); }
 .conf-badge.conf-Low { background: var(--conf-low-bg); color: var(--conf-low-fg); border-color: var(--border-light); }
+/* Deliberately NOT a fourth point on the High/Medium/Low spectrum -- a
+   dashed border and flat, uncolored treatment signals "no graded claim
+   exists here" rather than "graded low." See core/ensemble.py's
+   unvalidated_confidence_tier() docstring: shown for the 4 market/sport
+   combinations where confidence was proven backwards with no fix found --
+   the pick is still real (cleared a genuine edge threshold), the
+   confidence label specifically is the thing being withheld, honestly. */
+.conf-badge.conf-Unvalidated { background: transparent; color: var(--muted); border: 1px dashed var(--border-light); text-transform: none; letter-spacing: 0.3px; }
 .conf-badge.conf-lg { font-size: 11.5px; padding: 5px 13px; }
 .conf-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 

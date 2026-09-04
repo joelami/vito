@@ -345,3 +345,31 @@ def total_side_confidence_tier(side: str) -> str:
     mechanism was never even checked against their data.
     """
     return "High" if side == "under" else "Low"
+
+
+def unvalidated_confidence_tier() -> str:
+    """
+    App-owner decision (2026-09-03), not a technical finding: for the four
+    market/sport combinations where confidence_tier() is proven backwards
+    with NO validated replacement found after real investigation --
+    NBA moneyline, NBA spread, MLB spread, CFB spread -- showing a
+    High/Medium/Low label at all is actively worse than showing nothing,
+    because a confidence badge that's been directly measured to be
+    backwards is misleading, not just unhelpful. Every real mechanism
+    tried for these four (market agreement/disagreement, edge magnitude,
+    home/away split, favorite/underdog split -- see market_agreement_
+    confidence_tier(), spread_market_disagreement_confidence_tier(), and
+    edge_magnitude_confidence_tier()'s docstrings, plus the honest null
+    result logged in decision_log.jsonl for this exact investigation)
+    failed to produce a real, stable signal.
+
+    Chosen over hiding these picks entirely: they still cleared a real,
+    walk-forward-validated edge threshold (min_edge_pct via BacktestConfig)
+    -- the uncertainty is specifically about the CONFIDENCE label, not
+    about whether the pick qualifies as a real opportunity at all. Explicit
+    UI treatment (a distinct, non-graded badge, not styled anywhere near
+    High/Medium/Low's implied spectrum) -- see frontend's .conf-Unvalidated
+    CSS and edge_finder.py's MONEYLINE_UNVALIDATED_SPORTS/
+    SPREAD_UNVALIDATED_SPORTS.
+    """
+    return "Unvalidated"
