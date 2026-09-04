@@ -60,12 +60,47 @@ def _opportunity(market, side, line, model_prob, market_fair_prob, market_odds,
 # (24.4% hit rate, -17.5% ROI, n=520) -- almost certainly because CFB's
 # odds coverage is sparse/partly-assumed (see docs/METHODOLOGY.md's NCAAF
 # section), so `market_fair_prob` there often isn't a genuine market read
-# to agree or disagree with. NBA/NHL haven't been checked at all (both
-# off-season, zero live picks, lower urgency) -- they get the OLD
-# confidence_tier() until someone actually validates this for them too.
-# Every sport not in this set keeps the pre-existing submodel-agreement
-# confidence_tier() for moneyline, unchanged.
+# to agree or disagree with. NBA checked 2026-09 and explicitly NOT
+# added -- see ensemble.py's market_agreement_confidence_tier() docstring:
+# an initial pass found a real-looking split, but it was measured on a
+# confidence-pre-filtered population; re-checked on the true confidence-
+# blind population the split shrinks to noise AND flips sign between
+# season halves. NBA moneyline stays backwards and unfixed, honestly.
+# NHL still hasn't been checked (zero live picks, lower urgency) -- gets
+# the OLD confidence_tier() until someone actually validates this for it
+# too. Every sport not in this set keeps the pre-existing submodel-
+# agreement confidence_tier() for moneyline, unchanged.
 MARKET_AGREEMENT_CONFIDENCE_SPORTS = {"NFL", "MLB"}
+
+# NFL-SPREAD-ONLY: spread_market_disagreement_confidence_tier (see
+# ensemble.py's docstring) -- the INVERTED version of the moneyline
+# mechanism above, validated separately and specifically for NFL spread.
+# Checked directly and NOT generalized to the other sports: MLB/NBA show no
+# real ROI gap on this same criterion (hit-rate differs but ROI doesn't --
+# just odds-asymmetry noise), and CFB/NHL have degenerate spread odds data
+# (market_fair_prob is a constant ~0.5 for every qualifying bet in both --
+# no real two-way price to agree or disagree with in the first place).
+SPREAD_MARKET_DISAGREEMENT_CONFIDENCE_SPORTS = {"NFL"}
+
+# NHL-SPREAD-ONLY: edge_magnitude_confidence_tier (see ensemble.py's
+# docstring) -- a different mechanism again (edge SIZE, not market
+# agreement), validated specifically for NHL because NHL's spread odds are
+# themselves degenerate (constant -110 for every bet, see above), so the
+# only real signal left is how far the model's own blended probability sits
+# from a coin flip. Checked directly and NOT generalized: this same
+# edge-bucket check is NOT monotonic for NFL/MLB/NBA/CFB spread (middling
+# buckets under- or out-perform inconsistently there), so it stays NHL-only.
+SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS = {"NHL"}
+
+# NFL+MLB TOTAL ONLY: total_side_confidence_tier (see ensemble.py's
+# docstring) -- checked directly and validated independently in BOTH
+# sports (same "under beats over" direction, each with its own real
+# effect size and its own season-based split-half stability check), the
+# same two-sport-independent-confirmation bar moneyline's fix was held to.
+# NOT extended to NBA/NHL/CFB total -- the standing audit already shows
+# those three are monotonic (not backwards) under the OLD confidence_tier(),
+# so there is no problem there to fix and no reason to touch them.
+TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 
 
 def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float,
@@ -77,13 +112,16 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
     odds columns for the requested `price_point`.
 
     `sport`, if given, gates which moneyline confidence function is used
-    (see MARKET_AGREEMENT_CONFIDENCE_SPORTS above) -- defaults to the old,
-    always-safe submodel-agreement confidence_tier() when sport is None or
-    not in that set, so an uncertain/unvalidated caller never silently
-    picks up the new behavior.
+    (see MARKET_AGREEMENT_CONFIDENCE_SPORTS above) and which spread
+    confidence function is used (see SPREAD_MARKET_DISAGREEMENT_CONFIDENCE_
+    SPORTS / SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS above) -- defaults to
+    the old, always-safe submodel-agreement confidence_tier() for both
+    markets when sport is None or not in the relevant set, so an
+    uncertain/unvalidated caller never silently picks up new behavior.
     """
     opps = []
-    use_market_agreement = sport is not None and sport.upper() in MARKET_AGREEMENT_CONFIDENCE_SPORTS
+    sport_u = sport.upper() if sport is not None else None
+    use_market_agreement = sport_u in MARKET_AGREEMENT_CONFIDENCE_SPORTS
 
     def get(col):
         v = row.get(col) if hasattr(row, "get") else row[col]
@@ -120,11 +158,26 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
         fair_home, fair_away = odds_math.devig_two_way(home_line_odds, away_line_odds)
         if fair_home is not None:
             sp = ensemble.spread_cover_prob(row, home_line, stds, elo_points_per_margin, cfg)
-            conf = ensemble.confidence_tier(sp["elo_prob"], sp["ml_prob"])
+            # Computed PER SIDE, like moneyline's fix -- home and away can
+            # land in different tiers, since both new mechanisms below key
+            # off per-side values (market_fair_prob / edge_pct), not a
+            # game-level abstraction. See SPREAD_MARKET_DISAGREEMENT_
+            # CONFIDENCE_SPORTS / SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS
+            # above for which sports are validated for which mechanism.
+            if sport_u in SPREAD_MARKET_DISAGREEMENT_CONFIDENCE_SPORTS:
+                conf_home = ensemble.spread_market_disagreement_confidence_tier(fair_home)
+                conf_away = ensemble.spread_market_disagreement_confidence_tier(fair_away)
+            elif sport_u in SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS:
+                edge_home_pct = (sp["blended_prob"] - fair_home) * 100.0
+                edge_away_pct = ((1.0 - sp["blended_prob"]) - fair_away) * 100.0
+                conf_home = ensemble.edge_magnitude_confidence_tier(edge_home_pct)
+                conf_away = ensemble.edge_magnitude_confidence_tier(edge_away_pct)
+            else:
+                conf_home = conf_away = ensemble.confidence_tier(sp["elo_prob"], sp["ml_prob"])
             opps.append(_opportunity("spread", "home", home_line, sp["blended_prob"],
-                                      fair_home, home_line_odds, conf, kelly_frac))
+                                      fair_home, home_line_odds, conf_home, kelly_frac))
             opps.append(_opportunity("spread", "away", -home_line, 1.0 - sp["blended_prob"],
-                                      fair_away, away_line_odds, conf, kelly_frac))
+                                      fair_away, away_line_odds, conf_away, kelly_frac))
 
     # ---------- Total ----------
     total_line = get(f"Total Score {price_point}")
@@ -133,10 +186,20 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
         fair_over, fair_under = odds_math.devig_two_way(over_odds, under_odds)
         if fair_over is not None:
             tot = ensemble.total_over_prob(row, total_line, stds, cfg)
-            conf = ensemble.confidence_tier(tot["ml_prob"], tot["naive_prob"])
+            # total_side_confidence_tier only for sports directly validated
+            # (see TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS above) -- every other
+            # sport keeps the old confidence_tier(), unchanged. This one
+            # doesn't need a per-side probability at all (unlike moneyline/
+            # spread's fixes) -- the validated signal is the literal side
+            # label itself (over vs under), not a market or model quantity.
+            if sport_u in TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS:
+                conf_over = ensemble.total_side_confidence_tier("over")
+                conf_under = ensemble.total_side_confidence_tier("under")
+            else:
+                conf_over = conf_under = ensemble.confidence_tier(tot["ml_prob"], tot["naive_prob"])
             opps.append(_opportunity("total", "over", total_line, tot["blended_prob"],
-                                      fair_over, over_odds, conf, kelly_frac))
+                                      fair_over, over_odds, conf_over, kelly_frac))
             opps.append(_opportunity("total", "under", total_line, 1.0 - tot["blended_prob"],
-                                      fair_under, under_odds, conf, kelly_frac))
+                                      fair_under, under_odds, conf_under, kelly_frac))
 
     return opps
