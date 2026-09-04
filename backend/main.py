@@ -48,6 +48,35 @@ def startup():
     from core.dataset_sync import sync_datasets
     sync_datasets()  # no-op if Datasets/ is already present (local dev, or a persisted volume)
 
+    # Real incident this closes (2026-09-02, and apparently recurring): a
+    # Railway Volume backing database.DB_PATH gets recreated (an
+    # infrastructure event, not an app bug) and the app just silently starts
+    # over with a brand-new, empty DB -- init_db() below only CREATEs
+    # tables, it doesn't know or care whether they used to have 140+ settled
+    # forward_picks in them. core/db_backup.py's restore_latest_backup()
+    # has existed since that first incident but was NEVER actually wired
+    # into startup anywhere -- a backup nobody automatically restores from
+    # isn't a real fix, it's a manual step someone has to remember to run
+    # AFTER already noticing picks are gone, which is exactly what just
+    # happened again. This must run BEFORE init_db() (which is safe to run
+    # either way, CREATE TABLE IF NOT EXISTS) and BEFORE anything else
+    # touches DB_PATH — the only reliable signal that this is a fresh/wiped
+    # volume rather than a normal restart is that the file doesn't exist yet
+    # at all (restore_latest_backup() itself already refuses to overwrite an
+    # existing non-empty DB, so this is safe to attempt unconditionally; it
+    # no-ops harmlessly if R2 creds aren't set, e.g. local dev).
+    if not database.DB_PATH.exists():
+        try:
+            from core.db_backup import restore_latest_backup
+            restored = restore_latest_backup()
+            if restored:
+                print(f"[startup] DB_PATH was missing (fresh/wiped volume) -- restored from R2 backup: {restored}")
+            else:
+                print(f"[startup] DB_PATH was missing and no R2 backup was available to restore -- "
+                      f"starting with a brand-new, empty database.")
+        except Exception as e:
+            print(f"[startup] auto-restore-from-backup FAILED (continuing with a fresh database): {e}")
+
     database.init_db()
     nfl_pipeline = build_sport_pipeline("NFL", persist_backtest=True)
     _data.update(nfl_pipeline)  # legacy flat access — every existing NFL-only route reads _data directly
