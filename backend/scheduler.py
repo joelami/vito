@@ -112,6 +112,26 @@ def _run_full(pipelines: dict = None):
     except Exception as e:
         print(f"[scheduler] live confidence audit FAILED: {e}")
 
+    # Real-but-underpowered subgroup effects (see core/shrinkage.py,
+    # core/research.py's evaluate_subgroup_hypothesis()) don't get
+    # auto-re-tested here -- that would mean silently re-running research
+    # code and letting it silently promote itself to "adopt," which is
+    # exactly the kind of unreviewed change this project's whole discipline
+    # exists to prevent. This only nudges: surface which watched effects
+    # haven't been looked at in a while so a real research pass picks them
+    # back up with fresh data, instead of a promising, honestly-labeled
+    # "watch" item just being forgotten.
+    try:
+        from core.watchlist import stale_items
+        stale = stale_items(max_age_days=30)
+        if stale:
+            print(f"\n[scheduler] {len(stale)} subgroup watchlist item(s) due for a fresh look "
+                  f"(not auto-rechecked -- see core/watchlist.py):")
+            for e in stale:
+                print(f"  - [{e['sport']}/{e['market']}] {e['name']} (last checked {e['timestamp'][:10]})")
+    except Exception as e:
+        print(f"[scheduler] watchlist staleness check FAILED: {e}")
+
 
 def _run_sync_only():
     for sport in LIVE_SPORTS:
@@ -121,6 +141,19 @@ def _run_sync_only():
         except Exception as e:
             print(f"[scheduler] {sport} sync-only FAILED: {e}")
     _run_parlays(snapshot_new=False)
+
+    # Was previously only taken on the 09:00 UTC full run (see _run_full's
+    # own comment) -- meaning a settlement that happens right after this
+    # 21:00 UTC pass sat unprotected by any whole-DB snapshot for up to 12
+    # hours. core/live_log.py's per-pick backstop (see main.py's startup)
+    # covers that specific gap now regardless, but there's no reason to
+    # leave the periodic snapshot itself on a slower cadence than it needs
+    # to be -- this is a cheap file upload, not a rebuild.
+    try:
+        from core.db_backup import backup_database
+        backup_database()
+    except Exception as e:
+        print(f"[scheduler] database backup FAILED: {e}")
 
 
 def _loop(boot_pipelines: dict = None):

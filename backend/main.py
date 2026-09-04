@@ -78,6 +78,27 @@ def startup():
             print(f"[startup] auto-restore-from-backup FAILED (continuing with a fresh database): {e}")
 
     database.init_db()
+
+    # Second, finer-grained layer under the whole-DB restore above (see
+    # core/live_log.py's module docstring for the full reasoning): the
+    # periodic snapshot restore only recovers data as of the last backup
+    # (09:00 UTC, or the last redeploy) -- anything logged or settled after
+    # that and before a wipe is still gone unless it also has its own
+    # per-pick copy in R2. Runs unconditionally on every boot, not just
+    # after a detected wipe: it's a fully idempotent upsert (a normal boot
+    # with an intact, current database just re-applies identical values),
+    # so there's no cost to always checking rather than trying to guess
+    # whether this boot needs it.
+    try:
+        from core.live_log import restore_gap
+        with database.get_db() as conn:
+            n = restore_gap(conn)
+        if n:
+            print(f"[startup] live_log backstop processed {n} pick(s) from R2 (fills any gap the last "
+                  f"periodic backup missed).")
+    except Exception as e:
+        print(f"[startup] live_log restore_gap FAILED (non-fatal): {e}")
+
     nfl_pipeline = build_sport_pipeline("NFL", persist_backtest=True)
     _data.update(nfl_pipeline)  # legacy flat access — every existing NFL-only route reads _data directly
 

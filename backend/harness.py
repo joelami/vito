@@ -172,6 +172,20 @@ def snapshot_new_picks(pipeline: dict, sport: str, events: list) -> int:
                 )
                 if cur.rowcount:
                     logged += 1
+                    # Real-time R2 backstop (see core/live_log.py) -- re-reads
+                    # the row that was just written (never reconstructs one
+                    # from these in-memory values) so the backstop can never
+                    # drift from what's actually in the database. Non-fatal:
+                    # this app's picks are logged into forward_picks above
+                    # regardless of whether this succeeds.
+                    from core.live_log import append_pick
+                    new_row = conn.execute(
+                        "SELECT * FROM forward_picks WHERE sport=? AND espn_event_id=? AND market=? "
+                        "AND side=? AND line IS ?",
+                        (sport, e["espn_event_id"], o.market, o.side, o.line),
+                    ).fetchone()
+                    if new_row:
+                        append_pick(new_row)
     return logged
 
 
@@ -241,6 +255,13 @@ def settle_finished_picks(sport: str) -> int:
                 (result, profit, clv, p["id"]),
             )
             settled += 1
+            # Real-time R2 backstop (see core/live_log.py) -- re-reads the
+            # now-settled row so the backstop reflects the real, complete
+            # settlement, not just the original unsettled pick. Non-fatal.
+            from core.live_log import append_pick
+            settled_row = conn.execute("SELECT * FROM forward_picks WHERE id = ?", (p["id"],)).fetchone()
+            if settled_row:
+                append_pick(settled_row)
     return settled
 
 
