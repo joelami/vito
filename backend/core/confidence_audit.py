@@ -88,6 +88,38 @@ def audit_all_markets(bets: pd.DataFrame, min_bets_for_verdict: int = 30) -> lis
     return [audit_market(bets, m, min_bets_for_verdict) for m in sorted(bets["market"].unique())]
 
 
+def audit_live_forward_test(sport: str, min_bets_for_verdict: int = 15) -> list:
+    """
+    Same audit, but against REAL settled forward_picks for `sport` -- the
+    actual growing live track record, not the fixed historical backtest.
+    This is the real point of "have the harness do part of this as we gain
+    more data over time": a confidence scheme validated on a 2012-2021 (or
+    similar) historical archive is still just a claim about the PAST until
+    it's also checked against picks the app is ACTUALLY making right now.
+
+    forward_picks already has the exact same shape audit_market() expects
+    (`market`, `confidence`, `result` as a 'win'/'loss'/'push' string,
+    `profit_units`) -- no reshaping needed, confirmed directly against the
+    real schema before writing this rather than assumed.
+
+    `min_bets_for_verdict` defaults lower than the historical version (15
+    vs 30) because live samples are, by construction, much smaller and
+    will be for a long time -- this doesn't lower the bar for what counts
+    as a real signal, it just means most live audits will honestly report
+    "insufficient_sample" for a while rather than never being checked at
+    all. That's the correct, honest state, not a bug.
+    """
+    import database
+    with database.get_db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM forward_picks WHERE sport = ? AND settled = 1", (sport,)
+        ).fetchall()]
+    if not rows:
+        return []
+    bets = pd.DataFrame(rows)
+    return audit_all_markets(bets, min_bets_for_verdict)
+
+
 def print_audit(sport: str, results: list) -> None:
     print(f"\n=== Confidence audit: {sport} ===")
     for r in results:

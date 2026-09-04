@@ -93,6 +93,25 @@ def _run_full(pipelines: dict = None):
     except Exception as e:
         print(f"[scheduler] database backup FAILED: {e}")
 
+    # Real gap this closes: confidence_tier() sat unvalidated against real
+    # outcomes for months until someone asked directly (see decision_log.jsonl
+    # -- multiple confidence tiers turned out to be backwards, in production,
+    # the whole time). A validated fix is still just a claim about a fixed
+    # historical sample until it's also checked against what the app is
+    # ACTUALLY producing live -- this runs that check daily, against the
+    # real, growing forward_picks table, not just the static backtest. Early
+    # on, most sports/markets will honestly report "insufficient_sample" --
+    # that's the correct, expected state while the live sample is still
+    # small, not a bug. A caught exception here never blocks anything else.
+    try:
+        from core.confidence_audit import audit_live_forward_test, print_audit
+        for sport in LIVE_SPORTS:
+            results = audit_live_forward_test(sport)
+            if results:
+                print_audit(f"{sport} (LIVE)", results)
+    except Exception as e:
+        print(f"[scheduler] live confidence audit FAILED: {e}")
+
 
 def _run_sync_only():
     for sport in LIVE_SPORTS:
