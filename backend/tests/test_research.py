@@ -53,6 +53,33 @@ class TestHypothesisRequiresReasoning:
         assert h.name == "x"
 
 
+class TestTestsRunSoFar:
+    def test_rerunning_the_same_hypothesis_does_not_double_count(self):
+        # Real bug this guards: a human (or the watchlist recheck flow)
+        # re-running the SAME research script a second time with fresh
+        # data must not silently inflate the Bonferroni bar for every
+        # future NEW hypothesis in the project.
+        baseline = metrics(margin_corr=0.30, total_corr=0.10, roi_pct=2.0)
+        variant = metrics(margin_corr=0.32, total_corr=0.10, roi_pct=2.5)
+        research.evaluate_hypothesis(hyp(name="rerun_check"), baseline, variant)
+        assert research.tests_run_so_far() == 1
+        research.evaluate_hypothesis(hyp(name="rerun_check"), baseline, variant)
+        assert research.tests_run_so_far() == 1   # still 1, not 2
+
+    def test_two_distinct_hypotheses_both_count(self):
+        baseline = metrics(margin_corr=0.30, total_corr=0.10, roi_pct=2.0)
+        variant = metrics(margin_corr=0.32, total_corr=0.10, roi_pct=2.5)
+        research.evaluate_hypothesis(hyp(name="distinct_a"), baseline, variant)
+        research.evaluate_hypothesis(hyp(name="distinct_b"), baseline, variant)
+        assert research.tests_run_so_far() == 2
+
+    def test_regression_test_named_entries_are_excluded(self):
+        baseline = metrics(margin_corr=0.30, total_corr=0.10, roi_pct=2.0)
+        variant = metrics(margin_corr=0.32, total_corr=0.10, roi_pct=2.5)
+        research.evaluate_hypothesis(hyp(name="regression_test_of_something"), baseline, variant)
+        assert research.tests_run_so_far() == 0
+
+
 class TestBonferroniStderrMultiplier:
     def test_single_test_matches_the_familiar_95pct_bar(self):
         # Documented anchor value in the function's own docstring.

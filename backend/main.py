@@ -872,6 +872,62 @@ def trigger_harness_run(x_admin_token: str = Header(default=None)):
 
 
 # ---------------------------------------------------------------------------
+# API: manual watchlist re-check trigger — same shape and same reasoning as
+# /api/admin/run-harness above (background thread, ADMIN_TOKEN-gated, fails
+# closed). Real gap this closes: core/watchlist.py's stale_items() already
+# nudges daily (scheduler.py's _run_full()) that a "watch" effect hasn't
+# been re-derived in a while, deliberately WITHOUT auto-rerunning the
+# research or auto-promoting anything — but the nudge was just a print()
+# into harness stdout, and even someone who saw it had to go find which
+# research script under sports/*/research_*.py matches which watchlist
+# entry. This is that mapping (core/watchlist_recheck.py's REGISTRY) made
+# into one button — the RESULT is identical to a human manually running
+# the script themselves (a fresh, honestly-logged entry, or a real
+# Hypothesis adopt/reject if the effect finally clears the bar), nothing
+# gets wired into live scoring automatically just because this ran.
+# ---------------------------------------------------------------------------
+@app.get("/api/admin/watchlist-status")
+def get_watchlist_status():
+    """
+    Read-only, no ADMIN_TOKEN needed (nothing destructive here) — the
+    other half of the recheck-watchlist gap: core/watchlist.py's
+    stale_items() nudge previously only ever surfaced as a print() into
+    harness stdout (Railway logs nobody watches proactively, see this
+    project's own no-alerting gap), so acting on it meant already knowing
+    to go look. This makes "what's on the watchlist, and is any of it
+    stale" a real, checkable thing instead.
+    """
+    from core.watchlist import latest_by_name, stale_items
+    stale_names = {e["name"] for e in stale_items()}
+    return {
+        "items": [
+            {**e, "is_stale": e["name"] in stale_names}
+            for e in latest_by_name().values()
+        ],
+    }
+
+
+@app.post("/api/admin/recheck-watchlist")
+def trigger_watchlist_recheck(x_admin_token: str = Header(default=None)):
+    import os
+    import threading
+
+    configured_token = os.environ.get("ADMIN_TOKEN")
+    if not configured_token:
+        raise HTTPException(503, "ADMIN_TOKEN isn't set on this deployment — nothing to check the caller against.")
+    if x_admin_token != configured_token:
+        raise HTTPException(403, "Invalid or missing X-Admin-Token header.")
+
+    from core.watchlist_recheck import run_stale_rechecks
+    threading.Thread(target=run_stale_rechecks, daemon=True, name="manual-watchlist-recheck").start()
+    return {"status": "started", "detail": "Re-deriving every stale watchlist item in the background — this can "
+                                            "take a few minutes per item (full walk-forward rebuild, same cost as "
+                                            "the original research script). Check decision_log.jsonl/"
+                                            "subgroup_watchlist.jsonl for fresh entries once it's done; nothing "
+                                            "here changes live scoring on its own."}
+
+
+# ---------------------------------------------------------------------------
 # Frontend serving
 # ---------------------------------------------------------------------------
 @app.get("/", include_in_schema=False)

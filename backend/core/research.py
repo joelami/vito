@@ -99,13 +99,25 @@ def _inverse_normal_cdf(p: float) -> float:
 
 
 def tests_run_so_far(sport: str = None) -> int:
-    """Counts real hypothesis tests already logged, for multiple-comparisons
-    awareness — the more tests run, the more of them will clear a fixed
-    noise bar by pure chance, so the bar for any individual test needs to
-    rise as the count grows. Excludes this module's own regression-test
-    entries (named with 'regression_test'/'regression_check')."""
+    """Counts DISTINCT real hypothesis tests already logged, for multiple-
+    comparisons awareness — the more tests run, the more of them will clear
+    a fixed noise bar by pure chance, so the bar for any individual test
+    needs to rise as the count grows. Excludes this module's own
+    regression-test entries (named with 'regression_test'/'regression_check').
+
+    Real gap this closes (2026-09-06): re-running the SAME hypothesis's
+    script a second time (a human re-checking a watchlist entry with fresh
+    data, exactly the workflow core/watchlist.py's stale_items() is meant
+    to prompt) used to add a SECOND entry to the count, one per name --
+    silently and permanently inflating the Bonferroni bar for every future
+    NEW hypothesis in the project, forever, every time an old one gets
+    revisited. The multiple-comparisons concern this bar exists for is
+    "how many distinct things have been fished for," not "how many times
+    has any of them been looked at again" -- deduplicating by the decision
+    string (which embeds the hypothesis's own name) is what actually
+    matches that intent."""
     decisions = versioning.read_decision_log()
-    count = 0
+    seen = set()
     for d in decisions:
         name = d.get("decision", "")
         if "Hypothesis test" not in name:
@@ -114,7 +126,8 @@ def tests_run_so_far(sport: str = None) -> int:
             continue
         if "regression_test" in name or "regression_check" in name:
             continue
-        count += 1
+        seen.add(name)
+    count = len(seen)
     return count
 
 
