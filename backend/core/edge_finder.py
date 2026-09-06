@@ -112,6 +112,51 @@ MONEYLINE_UNVALIDATED_SPORTS = {"NBA"}
 SPREAD_UNVALIDATED_SPORTS = {"NBA", "MLB", "CFB"}
 
 
+# Real incident this closes (2026-09-05): CFB spread was added to
+# SPREAD_UNVALIDATED_SPORTS on 2026-09-03, and every pick evaluate_game()
+# generates from that point on correctly gets the honest "Unvalidated"
+# label -- but forward_picks is insert-only (harness.py's snapshot_new_picks
+# never re-scores an existing pending row), so 46 CFB spread picks logged
+# BEFORE the gate shipped were still sitting unsettled with their old,
+# since-invalidated High/Medium labels. Those stale labels let the picks
+# pass core/parlay.py's min_confidence=("Medium","High") filter, and their
+# (almost certainly bogus -- see nhl_api_client.py-adjacent CFB investigation
+# in decision_log.jsonl) enormous edges dominated every parlay suggestion
+# for days, which is exactly the batch that live-settled at an 8.45% hit
+# rate. A one-time manual SQL fix closed the immediate incident, but the gap
+# it exposed -- adding a sport/market to one of the *_UNVALIDATED_SPORTS
+# sets above does nothing for picks already pending -- was still open and
+# could silently recur the next time either set changes mid-season. This
+# function is the durable fix: pure relabeling from data already stored on
+# the row (sport, market -- no need to touch model_prob/edge_pct, those
+# were never wrong, only the confidence claim attached to them was stale),
+# safe to call every harness cycle since it only ever downgrades a pending
+# row TO "Unvalidated" when its sport+market is in one of these sets and it
+# isn't already -- never the other direction, never a settled row.
+def reconcile_unvalidated_confidence(conn) -> int:
+    """Sweeps every pending (settled=0) forward_pick and forces confidence
+    to 'Unvalidated' for any (sport, market) currently gated into
+    MONEYLINE_UNVALIDATED_SPORTS / SPREAD_UNVALIDATED_SPORTS but not
+    already labeled that way -- self-healing the exact staleness bug
+    described above, idempotent, cheap enough to run every harness cycle."""
+    changed = 0
+    for sport in MONEYLINE_UNVALIDATED_SPORTS:
+        cur = conn.execute(
+            "UPDATE forward_picks SET confidence='Unvalidated' "
+            "WHERE sport=? AND market='moneyline' AND settled=0 AND confidence != 'Unvalidated'",
+            (sport,),
+        )
+        changed += cur.rowcount
+    for sport in SPREAD_UNVALIDATED_SPORTS:
+        cur = conn.execute(
+            "UPDATE forward_picks SET confidence='Unvalidated' "
+            "WHERE sport=? AND market='spread' AND settled=0 AND confidence != 'Unvalidated'",
+            (sport,),
+        )
+        changed += cur.rowcount
+    return changed
+
+
 def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float,
                    cfg: ensemble.EnsembleConfig, kelly_frac: float = 0.25,
                    price_point: str = "Close", sport: str = None) -> list:

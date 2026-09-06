@@ -33,7 +33,7 @@ from datetime import datetime, timedelta
 
 import database
 import reports
-from core import espn_client, odds_math, parlay
+from core import espn_client, odds_math, parlay, edge_finder
 from core.backtest import settle_bet
 from core.dispatch import build_pipeline as _build_pipeline, score_matchup as _score_matchup, LIVE_SPORTS
 from versioning import RunTrace
@@ -523,6 +523,23 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[harness] {sport} FAILED: {e}", file=sys.stderr)
             failures.append(sport)
+
+    # Self-heals the exact staleness bug edge_finder.reconcile_unvalidated_
+    # confidence()'s docstring describes: a pending pick logged before a
+    # sport/market got added to MONEYLINE_UNVALIDATED_SPORTS/SPREAD_
+    # UNVALIDATED_SPORTS keeps its old, since-invalidated High/Medium label
+    # forever otherwise, and stale High/Medium labels are exactly what let
+    # bogus edges leak into suggest_parlays()'s confidence filter. Runs
+    # every invocation (sync-only included, cheap, idempotent) so a gating
+    # change never needs a manual one-off SQL fix again.
+    try:
+        with database.get_db() as conn:
+            reconciled = edge_finder.reconcile_unvalidated_confidence(conn)
+        if reconciled:
+            print(f"[harness] reconciled {reconciled} stale-confidence pending picks to Unvalidated")
+    except Exception as e:
+        print(f"[harness] confidence reconciliation FAILED: {e}", file=sys.stderr)
+        failures.append("CONFIDENCE_RECONCILE")
 
     # Parlays are cross-league (pooled from every sport's pending picks at
     # once — see snapshot_new_parlays' docstring), so they're graded once
