@@ -111,6 +111,21 @@ TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 MONEYLINE_UNVALIDATED_SPORTS = {"NBA"}
 SPREAD_UNVALIDATED_SPORTS = {"NBA", "MLB", "CFB"}
 
+# Adopted 2026-09-05 (see decision_log.jsonl, sports/cfb/research_moneyline_
+# underdog_odds_subgroup.py): a real, DIFFERENT kind of problem from the
+# *_UNVALIDATED_SPORTS sets above -- those exist because a confidence LABEL
+# was proven unreliable while the bet itself still clears a real edge and
+# still gets shown. This is the opposite case: CFB moneyline bets at
+# extreme underdog prices are a real, stable, statistically confirmed
+# losing category on their own (confidence-blind subgroup test: z=-4.07,
+# clears this project's Bonferroni-aware bar of 3.23, same-sign effect
+# across both season halves of the dataset) -- not a labeling problem, an
+# honest "this specific bet type loses money" finding. The right response
+# is exclusion, not a softer label: never surface it as a qualifying
+# opportunity at all. Sport -> max decimal odds a moneyline side may have
+# and still be offered; None/absent = no cap (every sport but CFB, unchanged).
+MAX_MONEYLINE_UNDERDOG_ODDS = {"CFB": 10.0}
+
 
 # Real incident this closes (2026-09-05): CFB spread was added to
 # SPREAD_UNVALIDATED_SPORTS on 2026-09-03, and every pick evaluate_game()
@@ -152,6 +167,22 @@ def reconcile_unvalidated_confidence(conn) -> int:
             "UPDATE forward_picks SET confidence='Unvalidated' "
             "WHERE sport=? AND market='spread' AND settled=0 AND confidence != 'Unvalidated'",
             (sport,),
+        )
+        changed += cur.rowcount
+
+    # Same staleness pattern, different rule (see MAX_MONEYLINE_UNDERDOG_ODDS
+    # above): a pending moneyline pick already logged at an extreme
+    # underdog price evaluate_game() would no longer even offer today.
+    # Relabeling to 'Unvalidated' (rather than deleting) reuses the same
+    # already-understood mechanism -- it drops out of suggest_parlays()'s
+    # confidence filter and reads honestly on the Suggestions page -- for a
+    # pending pick that hasn't happened yet, not a settled historical one.
+    for sport, max_odds in MAX_MONEYLINE_UNDERDOG_ODDS.items():
+        cur = conn.execute(
+            "UPDATE forward_picks SET confidence='Unvalidated' "
+            "WHERE sport=? AND market='moneyline' AND settled=0 "
+            "AND market_odds >= ? AND confidence != 'Unvalidated'",
+            (sport, max_odds),
         )
         changed += cur.rowcount
     return changed
@@ -202,10 +233,17 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
                 conf_home = conf_away = ensemble.unvalidated_confidence_tier()
             else:
                 conf_home = conf_away = ensemble.confidence_tier(ml["elo_prob"], ml["ml_prob"])
-            opps.append(_opportunity("moneyline", "home", None, ml["blended_prob"],
-                                      fair_home, home_ml, conf_home, kelly_frac))
-            opps.append(_opportunity("moneyline", "away", None, 1.0 - ml["blended_prob"],
-                                      fair_away, away_ml, conf_away, kelly_frac))
+            # See MAX_MONEYLINE_UNDERDOG_ODDS above -- a real, confirmed
+            # losing category gets excluded outright, per side (an extreme
+            # underdog price on one side never implies anything about the
+            # other side's, real favorite prices are always <2.0 anyway).
+            max_dog_odds = MAX_MONEYLINE_UNDERDOG_ODDS.get(sport_u, float("inf"))
+            if home_ml <= max_dog_odds:
+                opps.append(_opportunity("moneyline", "home", None, ml["blended_prob"],
+                                          fair_home, home_ml, conf_home, kelly_frac))
+            if away_ml <= max_dog_odds:
+                opps.append(_opportunity("moneyline", "away", None, 1.0 - ml["blended_prob"],
+                                          fair_away, away_ml, conf_away, kelly_frac))
 
     # ---------- Spread ----------
     home_line = get(f"Home Line {price_point}")
