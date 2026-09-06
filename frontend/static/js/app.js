@@ -198,11 +198,25 @@ function app() {
     livetrack: {
       loading: true,
       bySport: {},   // sport -> /api/forward-test response
+      sort: 'date', order: 'desc',
+      filterMarket: 'ALL', filterConfidence: 'ALL', filterResult: 'ALL',
     },
 
     parlayTrack: {
       loading: true,
       data: null,   // /api/forward-test/parlays response
+      sort: 'snapshotted_at', order: 'desc',
+      filterResult: 'ALL', filterLegCount: 'ALL',
+    },
+
+    // Parlay tab's own "Build Your Own" leg-picker tables reuse the same
+    // live picks leaguePicks(sp) already feeds the Suggestions tab, but
+    // filtering that shared source would silently also filter Suggestions
+    // -- this is a separate layer applied only in the Parlay tab (see
+    // parlayLeaguePicks below), so the two tabs' filters stay independent.
+    parlayFilter: {
+      market: 'ALL', confidence: 'ALL',
+      sort: 'edge_pct', order: 'desc',
     },
 
     // ── Init / routing ──────────────────────────────────────────────────
@@ -314,6 +328,61 @@ function app() {
     leaguePicks(sport) {
       const d = this.suggestions.data;
       return (d && d.sports && d.sports[sport] && d.sports[sport].picks) || [];
+    },
+
+    // Parlay tab's own market/confidence filter over the same live picks
+    // Suggestions already loaded -- independent of Suggestions' own league
+    // filter, see parlayFilter's declaration above for why this is separate.
+    parlayLeaguePicks(sport) {
+      const { market, confidence } = this.parlayFilter;
+      return this.leaguePicks(sport).filter(p =>
+        (market === 'ALL' || p.market === market) &&
+        (confidence === 'ALL' || p.confidence === confidence)
+      );
+    },
+
+    sortParlayPicksBy(col) { this.sortBy(this.parlayFilter, col); },
+
+    sortedParlayLeaguePicks(sport) {
+      return this.sortRows(this.parlayLeaguePicks(sport), this.parlayFilter);
+    },
+
+    // Distinct confidence values across every league's LIVE suggestions
+    // (not settled history like forwardPicksConfidenceOptions) -- feeds the
+    // Parlay tab's own filter dropdown.
+    get parlayConfidenceOptions() {
+      const seen = new Set();
+      for (const sp of this.leagueOrder) {
+        for (const p of this.leaguePicks(sp)) {
+          if (p.confidence) seen.add(p.confidence);
+        }
+      }
+      return [...seen].sort();
+    },
+
+    // ── Generic column sort (shared by Live Track Record + Suggested
+    // Parlays tables; Ratings tab keeps its own copy since it predates
+    // this and already works) ───────────────────────────────────────────
+    sortBy(stateObj, col) {
+      if (stateObj.sort === col) {
+        stateObj.order = stateObj.order === 'asc' ? 'desc' : 'asc';
+      } else {
+        stateObj.sort = col;
+        stateObj.order = 'asc';
+      }
+    },
+
+    sortRows(rows, stateObj) {
+      const { sort, order } = stateObj;
+      const dir = order === 'asc' ? 1 : -1;
+      return [...rows].sort((a, b) => {
+        const av = a[sort], bv = b[sort];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;   // nulls/pending sort last regardless of direction
+        if (bv == null) return -1;
+        if (typeof av === 'string') return av.localeCompare(bv) * dir;
+        return (av - bv) * dir;
+      });
     },
 
     sportLastSyncedAt(sport) {
@@ -456,9 +525,37 @@ function app() {
       } finally { this.livetrack.loading = false; }
     },
 
+    sortForwardPicksBy(col) { this.sortBy(this.livetrack, col); },
+
+    // Normalizes a pick's settle state to the same 4 values the Result
+    // filter offers and forwardResultClass/-Label already render, so
+    // filtering and display can never quietly disagree with each other.
+    pickResultKey(p) {
+      return p.settled ? (['win', 'loss', 'push'].includes(p.result) ? p.result : 'pending') : 'pending';
+    },
+
     sortedForwardPicks(sp) {
-      const picks = (this.livetrack.bySport[sp] && this.livetrack.bySport[sp].picks) || [];
-      return [...picks].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      const { filterMarket, filterConfidence, filterResult } = this.livetrack;
+      const picks = ((this.livetrack.bySport[sp] && this.livetrack.bySport[sp].picks) || []).filter(p =>
+        (filterMarket === 'ALL' || p.market === filterMarket) &&
+        (filterConfidence === 'ALL' || p.confidence === filterConfidence) &&
+        (filterResult === 'ALL' || this.pickResultKey(p) === filterResult)
+      );
+      return this.sortRows(picks, this.livetrack);
+    },
+
+    // Distinct confidence values actually present today, across every
+    // league's settled+pending picks -- so the filter dropdown only ever
+    // offers a real, current option (never a stale "Low" left over from
+    // when that tier existed, or a value no live sport uses).
+    get forwardPicksConfidenceOptions() {
+      const seen = new Set();
+      for (const sp of this.liveSports) {
+        for (const p of (this.livetrack.bySport[sp] && this.livetrack.bySport[sp].picks) || []) {
+          if (p.confidence) seen.add(p.confidence);
+        }
+      }
+      return [...seen].sort();
     },
 
     // How Vito's actual suggested parlays (2/3/4/5-leg combos surfaced on
@@ -473,9 +570,19 @@ function app() {
       finally { this.parlayTrack.loading = false; }
     },
 
+    sortForwardParlaysBy(col) { this.sortBy(this.parlayTrack, col); },
+
+    parlayResultKey(p) {
+      return p.settled ? (['win', 'loss', 'push'].includes(p.result) ? p.result : 'pending') : 'pending';
+    },
+
     sortedForwardParlays() {
-      const parlays = (this.parlayTrack.data && this.parlayTrack.data.parlays) || [];
-      return [...parlays].sort((a, b) => (b.snapshotted_at || '').localeCompare(a.snapshotted_at || ''));
+      const { filterResult, filterLegCount } = this.parlayTrack;
+      const parlays = ((this.parlayTrack.data && this.parlayTrack.data.parlays) || []).filter(p =>
+        (filterResult === 'ALL' || this.parlayResultKey(p) === filterResult) &&
+        (filterLegCount === 'ALL' || p.leg_count === Number(filterLegCount))
+      );
+      return this.sortRows(parlays, this.parlayTrack);
     },
 
     parlayLegSummary(p) {

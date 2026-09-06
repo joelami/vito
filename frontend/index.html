@@ -234,20 +234,42 @@
             </div>
           </div>
 
+          <div class="filter-bar">
+            <select class="select-filter" x-model="parlayFilter.market">
+              <option value="ALL">All markets</option>
+              <option value="moneyline">Moneyline</option>
+              <option value="spread">Spread</option>
+              <option value="total">Total</option>
+            </select>
+            <select class="select-filter" x-model="parlayFilter.confidence">
+              <option value="ALL">All confidence</option>
+              <template x-for="c in parlayConfidenceOptions" :key="c">
+                <option :value="c" x-text="c"></option>
+              </template>
+            </select>
+          </div>
           <template x-for="sp in leagueOrder" :key="'pick-' + sp">
             <template x-if="leaguePicks(sp).length">
               <div class="mb-20">
                 <div class="section-divider" x-text="sp"></div>
-                <div class="card table-scroll">
+                <template x-if="sortedParlayLeaguePicks(sp).length === 0">
+                  <div class="empty-state">No <span x-text="sp"></span> suggestions match the current filters.</div>
+                </template>
+                <div class="card table-scroll" x-show="sortedParlayLeaguePicks(sp).length">
                   <table class="data-table data-table-cards">
                     <thead>
                       <tr>
-                        <th></th><th>Date</th><th>Matchup</th><th>Market / Side</th>
-                        <th class="num">Odds</th><th class="num">Edge %</th><th>Confidence</th>
+                        <th></th>
+                        <th class="sortable" :class="{sorted: parlayFilter.sort==='date'}" @click="sortParlayPicksBy('date')">Date</th>
+                        <th>Matchup</th>
+                        <th class="sortable" :class="{sorted: parlayFilter.sort==='market'}" @click="sortParlayPicksBy('market')">Market / Side</th>
+                        <th class="sortable num" :class="{sorted: parlayFilter.sort==='market_odds'}" @click="sortParlayPicksBy('market_odds')">Odds</th>
+                        <th class="sortable num" :class="{sorted: parlayFilter.sort==='edge_pct'}" @click="sortParlayPicksBy('edge_pct')">Edge %</th>
+                        <th class="sortable" :class="{sorted: parlayFilter.sort==='confidence'}" @click="sortParlayPicksBy('confidence')">Confidence</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <template x-for="p in leaguePicks(sp)" :key="legKey(p)">
+                      <template x-for="p in sortedParlayLeaguePicks(sp)" :key="legKey(p)">
                         <tr class="selectable-row" :class="{selected: isLegSelected(p)}" @click="toggleLeg(p)">
                           <td><input type="checkbox" :checked="isLegSelected(p)" @click.stop="toggleLeg(p)"></td>
                           <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
@@ -438,10 +460,37 @@
                       </div>
                     </template>
 
-                    <div class="table-scroll mt-16">
+                    <div class="filter-bar mt-16">
+                      <select class="select-filter" x-model="parlayTrack.filterLegCount">
+                        <option value="ALL">All leg counts</option>
+                        <template x-for="s in (parlayTrack.data.by_leg_count || []).filter(s => s.bets > 0)" :key="s.leg_count">
+                          <option :value="String(s.leg_count)" x-text="s.leg_count + '-leg'"></option>
+                        </template>
+                      </select>
+                      <select class="select-filter" x-model="parlayTrack.filterResult">
+                        <option value="ALL">All results</option>
+                        <option value="win">Win</option>
+                        <option value="loss">Loss</option>
+                        <option value="push">Push</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </div>
+                    <div class="table-scroll">
                       <table class="data-table data-table-cards">
-                        <thead><tr><th>Logged</th><th>Legs</th><th class="num">Odds</th><th class="num">Edge %</th><th>Result</th><th class="num">Profit (u)</th></tr></thead>
+                        <thead>
+                          <tr>
+                            <th class="sortable" :class="{sorted: parlayTrack.sort==='snapshotted_at'}" @click="sortForwardParlaysBy('snapshotted_at')">Logged</th>
+                            <th>Legs</th>
+                            <th class="sortable num" :class="{sorted: parlayTrack.sort==='combined_decimal_odds'}" @click="sortForwardParlaysBy('combined_decimal_odds')">Odds</th>
+                            <th class="sortable num" :class="{sorted: parlayTrack.sort==='edge_pct'}" @click="sortForwardParlaysBy('edge_pct')">Edge %</th>
+                            <th class="sortable" :class="{sorted: parlayTrack.sort==='result'}" @click="sortForwardParlaysBy('result')">Result</th>
+                            <th class="sortable num" :class="{sorted: parlayTrack.sort==='profit_units'}" @click="sortForwardParlaysBy('profit_units')">Profit (u)</th>
+                          </tr>
+                        </thead>
                         <tbody>
+                          <template x-if="sortedForwardParlays().length === 0">
+                            <tr><td colspan="6" class="empty-state">No parlays match the current filters.</td></tr>
+                          </template>
                           <template x-for="p in sortedForwardParlays()" :key="p.id">
                             <tr>
                               <td class="muted" data-label="Logged" x-text="fmtDate(p.snapshotted_at)"></td>
@@ -462,6 +511,27 @@
           </template>
 
           <!-- Per-league detail -->
+          <div class="filter-bar">
+            <select class="select-filter" x-model="livetrack.filterMarket">
+              <option value="ALL">All markets</option>
+              <option value="moneyline">Moneyline</option>
+              <option value="spread">Spread</option>
+              <option value="total">Total</option>
+            </select>
+            <select class="select-filter" x-model="livetrack.filterConfidence">
+              <option value="ALL">All confidence</option>
+              <template x-for="c in forwardPicksConfidenceOptions" :key="c">
+                <option :value="c" x-text="c"></option>
+              </template>
+            </select>
+            <select class="select-filter" x-model="livetrack.filterResult">
+              <option value="ALL">All results</option>
+              <option value="win">Win</option>
+              <option value="loss">Loss</option>
+              <option value="push">Push</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
           <template x-for="sp in liveSports" :key="sp">
             <template x-if="livetrack.bySport[sp]">
               <div class="mb-20">
@@ -513,12 +583,20 @@
                       <table class="data-table data-table-cards">
                         <thead>
                           <tr>
-                            <th>Date</th><th>Matchup</th><th>Market / Side</th>
-                            <th class="num">Odds</th><th class="num">Edge %</th><th>Confidence</th>
-                            <th>Result</th><th class="num">CLV %</th>
+                            <th class="sortable" :class="{sorted: livetrack.sort==='date'}" @click="sortForwardPicksBy('date')">Date</th>
+                            <th>Matchup</th>
+                            <th class="sortable" :class="{sorted: livetrack.sort==='market'}" @click="sortForwardPicksBy('market')">Market / Side</th>
+                            <th class="sortable num" :class="{sorted: livetrack.sort==='market_odds'}" @click="sortForwardPicksBy('market_odds')">Odds</th>
+                            <th class="sortable num" :class="{sorted: livetrack.sort==='edge_pct'}" @click="sortForwardPicksBy('edge_pct')">Edge %</th>
+                            <th class="sortable" :class="{sorted: livetrack.sort==='confidence'}" @click="sortForwardPicksBy('confidence')">Confidence</th>
+                            <th class="sortable" :class="{sorted: livetrack.sort==='result'}" @click="sortForwardPicksBy('result')">Result</th>
+                            <th class="sortable num" :class="{sorted: livetrack.sort==='clv_pct'}" @click="sortForwardPicksBy('clv_pct')">CLV %</th>
                           </tr>
                         </thead>
                         <tbody>
+                          <template x-if="sortedForwardPicks(sp).length === 0">
+                            <tr><td colspan="8" class="empty-state">No picks match the current filters.</td></tr>
+                          </template>
                           <template x-for="p in sortedForwardPicks(sp)" :key="p.id">
                             <tr>
                               <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
