@@ -54,13 +54,47 @@ mismatch is exactly the proof this is real individual attribution, not a
 recomputation of the same team number research_goalie_pk.py already used.
 
 No "started" flag exists in the raw data, so the starting goalie for a
-given (gameId, team) is inferred as the goalie with the MAX `icetime` among
-that team's goalie rows for that game (situation=="all") -- a standard,
-defensible proxy (a starter who isn't pulled early plays the large majority
-of a game; a reliever who comes in after a pull necessarily has less ice
-time than the starter had already accumulated in the modal case). Verified
-unambiguous: grouping by (gameId, playerTeam) produces exactly one row per
-group after `idxmax` with zero groups needing a tie-break.
+given (gameId, team) was ORIGINALLY inferred (first version of this script)
+as the goalie with the MAX `icetime` among that team's goalie rows for that
+game (situation=="all") -- a standard, defensible proxy (a starter who
+isn't pulled early plays the large majority of a game; a reliever who comes
+in after a pull necessarily has less ice time than the starter had already
+accumulated in the modal case). Verified unambiguous: grouping by (gameId,
+playerTeam) produces exactly one row per group after `idxmax` with zero
+groups needing a tie-break.
+
+-----------------------------------------------------------------------
+UPGRADE (2026-09-04): REAL starter identity replaces the icetime-max proxy.
+NHL's own api-web.nhle.com boxscore endpoint (wrapped by
+sports/nhl/nhl_api_client.py, via the `nhl-api-py` package) reports a real
+per-goalie `starter: True/False` flag directly -- ground truth, not an
+inference -- and is populated back to at least the 1995-96 season (see
+nhl_api_client.py's module docstring). Fetched live for every one of the
+21,600 distinct real NHL game_ids in the MoneyPuck goalie log (2008-10-04
+through 2026-04-16, the same population the icetime-max proxy covered),
+cached at `Datasets/NHL/nhl_api_starter_cache.csv` (one row per goalie who
+appeared in a game, with the real `starter` flag) -- vendored the same way
+`nhl_archive_10Y.json` is (see odds_loader.py's module docstring: not
+synced via core.dataset_sync, since this script is throwaway research, not
+part of the production pipeline).
+
+MEASURED IMPACT of the upgrade, checked directly before trusting it: the
+icetime-max proxy and the real boxscore `starter` flag were compared on
+every (gameId, team) pair both could resolve (42,741 team-games; residual
+457 team-games -- ALL of them Phoenix Coyotes games where MoneyPuck's own
+data uses the blanket code "ARI" but the boxscore reports the real
+in-era abbreviation "PHX" -- resolved via a one-entry alias, not a mismatch
+in the underlying data). Result: **96.44% agreement (41,221/42,741)** --
+i.e. the icetime-max proxy picked the WRONG goalie as "starter" in 3.56%
+(1,520) of team-games. That is a real, non-trivial cleanup, not a rounding
+difference -- exactly the kind of case (a goalie pulled early in the first
+period, or a rare relief appearance that happened to log more total
+icetime than a very short outing by the actual starter) the proxy's own
+"large majority of the game" assumption could get wrong, and the real flag
+does not. `load_goalie_starter_table()` below now uses the real flag as
+authoritative, falling back to the icetime-max proxy only for the ~2% of
+team-games with no real-flag row available (the ARI/PHX residual after
+aliasing, plus any game outside the fetched population).
 
 JOIN MECHANICS (real, non-trivial, documented since it silently failed at
 first): `sports/nhl/loader.py`'s `games["date"]` is UTC and pushes evening
