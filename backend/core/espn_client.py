@@ -23,6 +23,7 @@ import urllib.request
 import urllib.error
 
 from . import odds_math
+from .retry import with_retries
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports"
 
@@ -36,23 +37,39 @@ SPORT_PATHS = {
 }
 
 
+def _fetch_once(url: str, timeout: float) -> dict:
+    # NOTE: ESPN's edge WAF 403s ANY custom User-Agent on these endpoints (tested:
+    # a browser-style UA, a plain custom string — both blocked) but allows the
+    # unmodified default UAs of common HTTP clients (confirmed: curl's own
+    # default, urllib's own default). Deliberately sending no headers at all so
+    # urllib's default "Python-urllib/x.y" goes out unmodified — do not add a
+    # User-Agent override here without re-testing against the live endpoint.
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def _get_json(url: str, timeout: float = 10.0) -> dict:
     """Shared fetch helper — every ESPN call in this module goes through
-    here so the WAF workaround (see note below) only needs to live in one
-    place. Returns {} on any network/parse failure rather than raising —
-    callers should treat that as "skipped this run," not a fatal error."""
+    here so the WAF workaround (see _fetch_once) and the retry policy both
+    only need to live in one place. Retries a real transient failure
+    (timeout, connection drop, a momentary non-2xx/HTTPError) up to 3
+    times with backoff — this is an unauthenticated, undocumented,
+    unversioned feed the harness only touches once or twice a day, so a
+    single blip used to mean that sport's ENTIRE sync silently skipped
+    until the next scheduled run, not "try again in a few seconds." Still
+    returns {} on final failure rather than raising — callers should treat
+    that as "skipped this run," not a fatal error, unchanged from before."""
     try:
-        # NOTE: ESPN's edge WAF 403s ANY custom User-Agent on these endpoints (tested:
-        # a browser-style UA, a plain custom string — both blocked) but allows the
-        # unmodified default UAs of common HTTP clients (confirmed: curl's own
-        # default, urllib's own default). Deliberately sending no headers at all so
-        # urllib's default "Python-urllib/x.y" goes out unmodified — do not add a
-        # User-Agent override here without re-testing against the live endpoint.
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return with_retries(
+            lambda: _fetch_once(url, timeout),
+            max_attempts=3, base_delay_s=1.0,
+            on_retry=lambda attempt, e, delay: print(
+                f"[espn_client] fetch failed for {url} (attempt {attempt + 1}/3): {e} "
+                f"-- retrying in {delay:.1f}s"),
+        )
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        print(f"[espn_client] fetch failed for {url}: {e}")
+        print(f"[espn_client] fetch failed for {url} after retries: {e}")
         return {}
 
 

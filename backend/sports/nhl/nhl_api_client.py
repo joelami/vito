@@ -58,8 +58,11 @@ endpoint and should be preferred by anything that can afford one live call,
 since the league adds one new season to this list every year.
 """
 
+import httpx
 from nhlpy import NHLClient
-from nhlpy.http_client import ResourceNotFoundException
+from nhlpy.http_client import ResourceNotFoundException, RateLimitExceededException, ServerErrorException
+
+from core.retry import with_retries
 
 _client = None
 
@@ -69,6 +72,28 @@ def _get_client() -> NHLClient:
     if _client is None:
         _client = NHLClient()
     return _client
+
+
+# What's actually worth retrying on this feed: a momentary 429 (rate limit),
+# a 5xx, or a real network-transport failure (timeout, connection drop) --
+# NOT a ResourceNotFoundException/BadRequestException/UnauthorizedException,
+# which are deterministic (retrying gets you the identical 404/400/401
+# every time) and would only delay the honest "no data" result every
+# caller here already handles.
+_RETRYABLE_EXC = (RateLimitExceededException, ServerErrorException, httpx.TransportError)
+
+
+def _call_with_retry(fn, label: str):
+    """Every real nhlpy call in this module goes through here -- one place
+    for the retry policy, matching core/espn_client.py's own _get_json.
+    Callers keep their own try/except around this for the *non*-retryable,
+    "this call genuinely has no data" case (ResourceNotFoundException etc.)."""
+    return with_retries(
+        fn, max_attempts=3, base_delay_s=1.0,
+        is_retryable=lambda e: isinstance(e, _RETRYABLE_EXC),
+        on_retry=lambda attempt, e, delay: print(
+            f"[nhl_api_client] {label} failed (attempt {attempt + 1}/3): {e} -- retrying in {delay:.1f}s"),
+    )
 
 
 # Live-verified 2026-09-04 via edge.goalie_landing()["seasonsWithEdgeStats"].
@@ -90,7 +115,7 @@ def edge_seasons_with_data(force_refresh: bool = False) -> frozenset:
     if not force_refresh:
         return EDGE_SEASONS
     try:
-        raw = _get_client().edge.goalie_landing()
+        raw = _call_with_retry(lambda: _get_client().edge.goalie_landing(), "edge_seasons_with_data")
         seasons = raw.get("seasonsWithEdgeStats") or []
         found = {str(s["id"]) for s in seasons if "id" in s}
         return frozenset(found) if found else EDGE_SEASONS
@@ -107,7 +132,9 @@ def get_boxscore(game_id) -> dict:
     research_starting_goalie_save_pct.py) -> the raw boxscore dict, or {} on
     any failure (unknown/future/malformed game_id) rather than raising."""
     try:
-        return _get_client().game_center.boxscore(str(game_id)) or {}
+        return _call_with_retry(
+            lambda: _get_client().game_center.boxscore(str(game_id)), f"get_boxscore(game_id={game_id})"
+        ) or {}
     except (ResourceNotFoundException, Exception) as e:
         print(f"[nhl_api_client] boxscore fetch failed for game_id={game_id}: {e}")
         return {}
@@ -162,7 +189,10 @@ def edge_goalie_detail(player_id, season: str, game_type: int = 2) -> dict:
     module docstring; this is NOT proof Edge has no data for the season
     itself, only for this specific player)."""
     try:
-        return _get_client().edge.goalie_detail(str(player_id), season=season, game_type=game_type) or {}
+        return _call_with_retry(
+            lambda: _get_client().edge.goalie_detail(str(player_id), season=season, game_type=game_type),
+            f"edge_goalie_detail(player_id={player_id}, season={season})",
+        ) or {}
     except (ResourceNotFoundException, Exception) as e:
         print(f"[nhl_api_client] edge_goalie_detail failed for player_id={player_id} season={season}: {e}")
         return {}
@@ -172,7 +202,10 @@ def edge_skater_skating_speed_detail(player_id, season: str, game_type: int = 2)
     """Real per-skater Edge top-speed detail for one season. `{}` on any
     failure (unknown player, pre-2021-22 season, below games-played bar)."""
     try:
-        return _get_client().edge.skater_skating_speed_detail(str(player_id), season=season, game_type=game_type) or {}
+        return _call_with_retry(
+            lambda: _get_client().edge.skater_skating_speed_detail(str(player_id), season=season, game_type=game_type),
+            f"edge_skater_skating_speed_detail(player_id={player_id}, season={season})",
+        ) or {}
     except (ResourceNotFoundException, Exception) as e:
         print(f"[nhl_api_client] edge_skater_skating_speed_detail failed for player_id={player_id} season={season}: {e}")
         return {}
@@ -182,7 +215,10 @@ def edge_skater_skating_distance_detail(player_id, season: str, game_type: int =
     """Real per-skater Edge total-distance-skated detail for one season. `{}`
     on any failure (see `edge_skater_skating_speed_detail`)."""
     try:
-        return _get_client().edge.skater_skating_distance_detail(str(player_id), season=season, game_type=game_type) or {}
+        return _call_with_retry(
+            lambda: _get_client().edge.skater_skating_distance_detail(str(player_id), season=season, game_type=game_type),
+            f"edge_skater_skating_distance_detail(player_id={player_id}, season={season})",
+        ) or {}
     except (ResourceNotFoundException, Exception) as e:
         print(f"[nhl_api_client] edge_skater_skating_distance_detail failed for player_id={player_id} season={season}: {e}")
         return {}
@@ -193,7 +229,10 @@ def edge_goalie_shot_location_detail(player_id, season: str, game_type: int = 2)
     out by ice-area, e.g. "Crease"/"High Slot"/"L Circle") for one season.
     `{}` on any failure."""
     try:
-        return _get_client().edge.goalie_shot_location_detail(str(player_id), season=season, game_type=game_type) or {}
+        return _call_with_retry(
+            lambda: _get_client().edge.goalie_shot_location_detail(str(player_id), season=season, game_type=game_type),
+            f"edge_goalie_shot_location_detail(player_id={player_id}, season={season})",
+        ) or {}
     except (ResourceNotFoundException, Exception) as e:
         print(f"[nhl_api_client] edge_goalie_shot_location_detail failed for player_id={player_id} season={season}: {e}")
         return {}
@@ -206,7 +245,7 @@ def daily_schedule(date: str = None) -> dict:
     NOT verifiable right now (confirmed 2026-09-04: `numberOfGames: 0`,
     NHL is in its off-season, `nextStartDate` is 2026-09-18 preseason)."""
     try:
-        return _get_client().schedule.daily_schedule(date) or {}
+        return _call_with_retry(lambda: _get_client().schedule.daily_schedule(date), f"daily_schedule(date={date})") or {}
     except Exception as e:
         print(f"[nhl_api_client] daily_schedule fetch failed for date={date}: {e}")
         return {}

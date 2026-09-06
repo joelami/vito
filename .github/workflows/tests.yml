@@ -1,0 +1,29 @@
+name: tests
+
+# Real gap this closes (2026-09-06): this project had zero automated tests
+# and no CI despite months of real, silently-shipped bugs in the pure math
+# layer (backwards confidence tiers, a CLV sign issue, this session's
+# stale-pending-picks bug) -- nothing ever ran the one thing that would
+# have caught a regression before it reached production. These tests are
+# deliberately scoped to core/'s pure functions (odds math, bet settlement,
+# the Elo rating engine, the hypothesis-testing decision logic) -- no R2
+# credentials, no 7.6GB Datasets/ download, no live network calls -- so
+# this stays fast and runs on every push/PR with zero secrets required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: cd backend && python3 -m pytest -v
