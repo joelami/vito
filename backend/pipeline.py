@@ -190,6 +190,13 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
             k_factor=config.ELO_K_FACTOR, start_rating=config.ELO_START_RATING,
             home_field_adv=config.HOME_FIELD_ADV_ELO, season_regression=config.SEASON_REGRESSION,
             mov_mult_base=config.MOV_MULT_BASE, mov_mult_divisor=config.MOV_MULT_DIVISOR,
+            # CFB-only (see sports/cfb/config.py, adopted 2026-09-05): every
+            # other sport built through this generic path is single-tier
+            # (every team plays a real, comparable schedule), so these
+            # attributes simply don't exist on their config modules and this
+            # stays the same flat-1500-for-everyone behavior it always was.
+            low_history_start_rating=getattr(config, "LOW_HISTORY_START_RATING", None),
+            low_history_game_threshold=getattr(config, "LOW_HISTORY_GAME_THRESHOLD", 0),
         ),
     )
     feats = features.build_features(games, rr.history)

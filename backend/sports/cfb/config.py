@@ -58,6 +58,21 @@ SEASON_REGRESSION = 0.30       # close to NFL's 0.33 - roster turnover pressure 
 MOV_MULT_BASE = 2.5
 MOV_MULT_DIVISOR = 3.5         # larger divisor than NFL's 2.2 to damp the multiplier for CFB's much more common 40-60 point blowouts
 
+# Adopted 2026-09-05 (see decision_log.jsonl, sports/cfb/research_rare_
+# opponent_start_rating.py): unlike a single-tier pro league, CFB mixes real
+# FBS programs with FCS/small-conference teams that only ever appear as
+# "buy game" opponents -- giving them the same flat 1500 start as an
+# established program is a real, checked-directly mispricing (teams with
+# <=8 total dataset appearances lose to common opponents by -16.7pts avg,
+# n=432, 27.5% win rate). Validated via walk-forward backtest: real
+# improvement in the model's own fit (margin_corr +0.0104, not just an ROI
+# wiggle), moneyline and total ROI both improved (adopt), spread flat within
+# noise (adopt_cautiously) -- none degraded. Does NOT fully fix the most
+# extreme underdog-price bets on its own (see MAX_MONEYLINE_UNDERDOG_ODDS
+# below for the complementary fix that does).
+LOW_HISTORY_START_RATING = 1300.0
+LOW_HISTORY_GAME_THRESHOLD = 8
+
 # Points-per-elo-point conversion, used to turn a rating differential into a
 # predicted scoring margin. Empirically fit (not guessed): regressing actual
 # margin on rating_diff_pre at the final tuned rating config gives a slope

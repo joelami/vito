@@ -32,6 +32,25 @@ class PowerRatingConfig:
     mov_mult_base: float = 2.2
     mov_mult_divisor: float = 2.2
 
+    # Real gap this closes (CFB, 2026-09-05): every sport built on this module
+    # gives a never-before-seen team the exact same start_rating as every
+    # other team, which is correct for a single-tier league (NFL/MLB/NBA/NHL
+    # -- every team plays a real, comparable schedule) but WRONG for CFB,
+    # which mixes real FBS programs with FCS/small-conference "buy game"
+    # opponents that only appear a handful of times. Checked directly: teams
+    # with <=8 total appearances in this project's CFB dataset lose to
+    # higher-appearance opponents by a real, sizable average margin (-16.7
+    # points, n=432, win rate 27.5%) -- a genuine, data-justified reason
+    # they don't belong at the same 1500 start as an established program,
+    # not an assumption. Optional and additive: None (the default) preserves
+    # today's behavior for every existing caller (NFL/MLB/NBA/NHL, and CFB
+    # itself unless explicitly opted in) -- only a caller that sets both
+    # fields below changes anything. See sports/cfb/research_rare_opponent_
+    # start_rating.py for the walk-forward-safe validation before this gets
+    # wired into CFB's actual production config.
+    low_history_start_rating: float = None   # None = disabled, use start_rating for every team
+    low_history_game_threshold: int = 0      # a team's Nth game and below gets low_history_start_rating instead
+
 
 def _expected_home(home_pre: float, away_pre: float, hfa: float) -> float:
     diff = (home_pre + hfa) - away_pre
@@ -91,18 +110,27 @@ def compute_power_ratings(
 
     ratings = {}
     last_season = {}
+    games_played = {}  # walk-forward safe: counts only games strictly before the current one
     rows = []
+    low_history_enabled = cfg.low_history_start_rating is not None and cfg.low_history_game_threshold > 0
 
     for _, g in games.iterrows():
         home, away = g[home_col], g[away_col]
         season = g[season_col]
 
         for team in (home, away):
+            still_low_history = low_history_enabled and games_played.get(team, 0) < cfg.low_history_game_threshold
+            team_start = cfg.low_history_start_rating if still_low_history else cfg.start_rating
             if team not in ratings:
-                ratings[team] = cfg.start_rating
+                ratings[team] = team_start
                 last_season[team] = season
             elif last_season[team] < season:
-                ratings[team] = ratings[team] + cfg.season_regression * (cfg.start_rating - ratings[team])
+                # Regress toward the low-history floor, not the full-league
+                # mean, for a team that still hasn't accumulated enough real
+                # games to prove it belongs in the same pool as an
+                # established program -- otherwise a single season boundary
+                # would erase most of the point of seeding it low at all.
+                ratings[team] = ratings[team] + cfg.season_regression * (team_start - ratings[team])
                 last_season[team] = season
 
         # neutral-site games (Super Bowl, international games) get no home-field bonus —
@@ -121,6 +149,9 @@ def compute_power_ratings(
         delta = cfg.k_factor * mov_mult * (actual_home - expected_home)
         ratings[home] = home_pre + delta
         ratings[away] = away_pre - delta
+
+        games_played[home] = games_played.get(home, 0) + 1
+        games_played[away] = games_played.get(away, 0) + 1
 
         rows.append({
             "game_id": g.get("game_id"),
