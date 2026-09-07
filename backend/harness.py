@@ -375,6 +375,46 @@ def settle_finished_parlays() -> int:
     return settled
 
 
+def reconcile_stale_confidence() -> int:
+    """
+    Self-heals the exact staleness bug edge_finder.reconcile_unvalidated_
+    confidence()'s own docstring describes: a pending pick logged before a
+    sport/market got added to MONEYLINE_UNVALIDATED_SPORTS/SPREAD_
+    UNVALIDATED_SPORTS (or MAX_MONEYLINE_UNDERDOG_ODDS) keeps its old,
+    since-invalidated High/Medium label forever otherwise, and stale
+    High/Medium labels are exactly what let bogus edges leak into
+    suggest_parlays()'s confidence filter. Cheap and idempotent -- safe to
+    call every harness invocation, sync-only included.
+
+    REAL INCIDENT this function's own existence didn't prevent (2026-09-06,
+    caught by the app owner from the live production UI, not by any check
+    here): this logic originally lived inline inside harness.py's own
+    `if __name__ == "__main__":` block -- which is the STANDALONE CLI path
+    (`python3 harness.py`, used by local launchd jobs). Railway never runs
+    that block at all; scheduler.py's in-process scheduler only ever
+    `import harness` and calls specific functions (see docs/DEPLOYMENT.md's
+    own explanation of why -- a separate Cron service wouldn't share the
+    DB volume). Every local `python3 harness.py` run this session quietly
+    kept the LOCAL dev database self-healed, which is exactly why this
+    looked fixed and verified -- while production's actual copy of this
+    exact bug (a stale, pre-fix CFB moneyline pick at 18.00 odds, still
+    labeled confident enough to reach a live suggested parlay) sat
+    unreconciled the whole time. Extracted to a real function specifically
+    so both real call sites (harness.py's own __main__ below, AND
+    scheduler.py's _run_full()/_run_sync_only(), which is what Railway
+    actually runs) can't silently drift apart like this again.
+    """
+    try:
+        with database.get_db() as conn:
+            reconciled = edge_finder.reconcile_unvalidated_confidence(conn)
+        if reconciled:
+            print(f"[harness] reconciled {reconciled} stale-confidence pending picks to Unvalidated")
+        return reconciled
+    except Exception as e:
+        print(f"[harness] confidence reconciliation FAILED: {e}", file=sys.stderr)
+        raise
+
+
 def print_report(sport: str = "NFL"):
     with database.get_db() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -524,21 +564,9 @@ if __name__ == "__main__":
             print(f"[harness] {sport} FAILED: {e}", file=sys.stderr)
             failures.append(sport)
 
-    # Self-heals the exact staleness bug edge_finder.reconcile_unvalidated_
-    # confidence()'s docstring describes: a pending pick logged before a
-    # sport/market got added to MONEYLINE_UNVALIDATED_SPORTS/SPREAD_
-    # UNVALIDATED_SPORTS keeps its old, since-invalidated High/Medium label
-    # forever otherwise, and stale High/Medium labels are exactly what let
-    # bogus edges leak into suggest_parlays()'s confidence filter. Runs
-    # every invocation (sync-only included, cheap, idempotent) so a gating
-    # change never needs a manual one-off SQL fix again.
     try:
-        with database.get_db() as conn:
-            reconciled = edge_finder.reconcile_unvalidated_confidence(conn)
-        if reconciled:
-            print(f"[harness] reconciled {reconciled} stale-confidence pending picks to Unvalidated")
-    except Exception as e:
-        print(f"[harness] confidence reconciliation FAILED: {e}", file=sys.stderr)
+        reconcile_stale_confidence()
+    except Exception:
         failures.append("CONFIDENCE_RECONCILE")
 
     # Parlays are cross-league (pooled from every sport's pending picks at

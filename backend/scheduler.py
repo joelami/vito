@@ -75,6 +75,20 @@ def _run_full(pipelines: dict = None):
             harness.run(sport, pipeline=(pipelines or {}).get(sport))
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
+
+    # Real incident this closes (2026-09-06, caught by the app owner from the
+    # live production UI): harness.reconcile_stale_confidence() originally
+    # only ran from harness.py's own `if __name__ == "__main__":` block --
+    # which Railway never executes (this in-process scheduler only ever
+    # `import harness` and calls specific functions, see harness.py's own
+    # docstring for reconcile_stale_confidence() for the full story). Must
+    # run BEFORE _run_parlays() below, same as the CLI path -- parlays are
+    # built from whatever confidence values are on the picks pool right now.
+    try:
+        harness.reconcile_stale_confidence()
+    except Exception as e:
+        print(f"[scheduler] confidence reconciliation FAILED: {e}")
+
     _run_parlays(snapshot_new=True)
 
     # Real incident this closes: on 2026-09-02 the Railway Volume backing
@@ -140,6 +154,15 @@ def _run_sync_only():
             print(f"[scheduler] {sport} sync-only: {result}")
         except Exception as e:
             print(f"[scheduler] {sport} sync-only FAILED: {e}")
+
+    # See the matching comment in _run_full() above -- same real incident,
+    # same fix, needed on this path too (a stale pick can be selected into
+    # a parlay on a sync-only pass just as easily as a full one).
+    try:
+        harness.reconcile_stale_confidence()
+    except Exception as e:
+        print(f"[scheduler] confidence reconciliation FAILED: {e}")
+
     _run_parlays(snapshot_new=False)
 
     # Was previously only taken on the 09:00 UTC full run (see _run_full's
