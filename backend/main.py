@@ -935,6 +935,18 @@ def serve_frontend():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
+@app.get("/manifest.json", include_in_schema=False)
+def serve_manifest():
+    return FileResponse(str(FRONTEND_DIR / "manifest.json"))
+
+
+# Legacy fallback: some browsers/crawlers request /favicon.ico at the domain
+# root regardless of the <link rel="icon"> tags in index.html's <head>.
+@app.get("/favicon.ico", include_in_schema=False)
+def serve_favicon():
+    return FileResponse(str(FRONTEND_DIR / "static" / "icons" / "favicon.ico"))
+
+
 if __name__ == "__main__":
     import os
     import uvicorn
