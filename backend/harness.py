@@ -497,6 +497,21 @@ def run(sport: str = "NFL", pipeline: dict = None):
           f"(total {trace.steps and sum(s['duration_s'] for s in trace.steps):.1f}s across "
           f"{len(trace.steps)} steps)")
 
+    # Real gap this closes (2026-09-14, caught by the app owner: "I don't
+    # see the rankings changing at all"): this function builds a genuinely
+    # fresh pipeline (current_ratings included) every scheduled run, but
+    # never handed it back to anything -- main.py's /api/ratings reads a
+    # SEPARATE copy (_data["pipelines"][sport]) that was only ever built
+    # ONCE, at server boot, and nothing ever refreshed it afterward. Real
+    # picks stayed fresh the whole time (snapshot_new_picks/settle_
+    # finished_picks are pure DB operations, no dependency on _data at
+    # all) -- only the Ratings tab specifically was frozen at whatever the
+    # last deploy happened to look like, for however long the process had
+    # been running since. Returning the pipeline here is what lets
+    # scheduler.py's _run_full() (the actual caller, see its own comment)
+    # push a fresh copy back into main._data after every full run.
+    return pipeline
+
 
 def _picks_since(sport: str, since: datetime) -> tuple:
     """Rows this run actually logged/settled, for the daily markdown report —

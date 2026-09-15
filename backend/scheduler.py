@@ -70,9 +70,37 @@ def _run_full(pipelines: dict = None):
     bug than the memory this reuse saves. Callers pass `pipelines=None`
     for every case except that one boot-time call.
     """
+    # Real incident this closes (2026-09-14, caught by the app owner: "I
+    # don't see the rankings changing at all"): harness.run() always
+    # rebuilds a genuinely fresh pipeline (current_ratings included) on
+    # every scheduled call -- that part was never the bug -- but nothing
+    # ever fed that fresh copy back into main.py's own `_data["pipelines"]`,
+    # which is what /api/ratings (and every other _data-reading route)
+    # actually serves. `_data["pipelines"]` was built exactly once, at
+    # server boot, and sat there unrefreshed for however long the process
+    # had been running -- real picks stayed fresh the whole time (pure DB
+    # operations, no dependency on _data), only the Ratings tab specifically
+    # was frozen. `import main` here is deliberately a LOCAL import, not a
+    # module-level one -- main.py imports THIS module (to start the
+    # scheduler), so a top-level `import main` in scheduler.py would be a
+    # circular import; by the time this function actually runs, both
+    # modules are already fully loaded and a local import just resolves to
+    # the same live main.py process, no re-execution.
     for sport in LIVE_SPORTS:
         try:
-            harness.run(sport, pipeline=(pipelines or {}).get(sport))
+            fresh_pipeline = harness.run(sport, pipeline=(pipelines or {}).get(sport))
+            if fresh_pipeline is not None:
+                import main
+                main._data["pipelines"][sport] = fresh_pipeline
+                if sport == "NFL":
+                    # NFL alone also has a flattened legacy view (see
+                    # main.py's own "legacy flat access" comment) that
+                    # several NFL-only routes (matchup scoring, backtest
+                    # summary, the history browser) read directly instead
+                    # of going through _data["pipelines"]["NFL"] -- must
+                    # stay in sync with it or those routes go stale while
+                    # Ratings correctly refreshes.
+                    main._data.update(fresh_pipeline)
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
 
