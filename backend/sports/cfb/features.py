@@ -412,6 +412,18 @@ ML_FEATURE_COLS = [
     # Adopted ("adopt") via hypothesis test "cfb_season_week_adj" - see
     # decision_log.jsonl and this module's docstring.
     "season_week_adj",
+    # Adopted (adopt_cautiously) via hypothesis test
+    # "cfb_cfbfastr_trailing_success_rate_features" - real, direct CFB
+    # analog of NFL's EPA/success-rate features (see decision_log.jsonl
+    # and sports/cfb/cfbfastr_features.py's docstring): margin_corr
+    # +0.029, total_corr +0.005 (both above the noise floor), ROI -0.08pp
+    # within its own standard error. Team-name mapping between cfbfastR's
+    # bare school names and this project's own franchise names only
+    # covers ~74% of games - the rest fall back to a league-average
+    # value, same honest fallback convention as every other trailing
+    # feature here.
+    "home_off_success_rate_trail", "home_def_success_rate_allowed_trail",
+    "away_off_success_rate_trail", "away_def_success_rate_allowed_trail",
 ]
 
 
@@ -460,6 +472,14 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_p
     lines) -- a real, separate, larger effort, not attempted in this pass.
     Flagged by core/matchup.py's own missing-feature warning rather than
     silently guessed at.
+
+    home/away_off_success_rate_trail, home/away_def_success_rate_allowed_trail:
+    NOW real, via cfbfastr_features.get_current_trailing_success() -- see
+    that function's own docstring. This is the exact same "explicit
+    hardcoded dict, not a dynamic ML_FEATURE_COLS pass" risk NFL's
+    matchup.py hit (a live prediction crashing/silently defaulting the
+    moment these columns joined ML_FEATURE_COLS) -- wired here proactively
+    rather than found the same way NFL's was.
     """
     if is_playoff:
         season_week_adj = float(RECENT_MAX_REGULAR_SEASON_WEEK) + 1.0
@@ -468,4 +488,21 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_p
     else:
         season_week_adj = float(RECENT_MAX_REGULAR_SEASON_WEEK) / 2.0  # honest "no info" midpoint, not a guessed exact week
 
-    return {"is_bowl": int(bool(is_playoff)), "season_week_adj": season_week_adj}
+    from .cfbfastr_features import get_current_trailing_success, TRAILING_COLS
+    try:
+        home_sr = get_current_trailing_success(home_fr)
+        away_sr = get_current_trailing_success(away_fr)
+        success_feats = {
+            "home_off_success_rate_trail": home_sr["off_success_rate"],
+            "home_def_success_rate_allowed_trail": home_sr["def_success_rate_allowed"],
+            "away_off_success_rate_trail": away_sr["off_success_rate"],
+            "away_def_success_rate_allowed_trail": away_sr["def_success_rate_allowed"],
+        }
+    except RuntimeError:
+        # Pipeline hasn't built the cfbfastR name mapping yet in this
+        # process (see get_current_trailing_success()'s docstring) --
+        # core/matchup.py's own neutral-default fallback covers this, not
+        # duplicated here; a real, logged gap, not a silent wrong number.
+        success_feats = {}
+
+    return {"is_bowl": int(bool(is_playoff)), "season_week_adj": season_week_adj, **success_feats}

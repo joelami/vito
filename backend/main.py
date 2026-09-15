@@ -86,6 +86,9 @@ def startup():
     # well after this project's original dataset set) -- see
     # core.dataset_sync.sync_file_if_missing's own docstring.
     sync_file_if_missing("NFL/nflfastr_team_game_epa.csv")
+    # Same gap, same fix, for the CFB analog (added 2026-09-14, see
+    # sports/cfb/cfbfastr_features.py).
+    sync_file_if_missing("College Football/cfbfastr_team_game_success.csv")
 
     # Real incident this closes (2026-09-02, and apparently recurring): a
     # Railway Volume backing database.DB_PATH gets recreated (an

@@ -209,6 +209,17 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
         ),
     )
     feats = features.build_features(games, rr.history)
+    if sport == "cfb":
+        # Adopted via hypothesis test "cfb_cfbfastr_trailing_success_rate_features"
+        # (see decision_log.jsonl and sports/cfb/cfbfastr_features.py's docstring) --
+        # CFB-specific, same reason build_nfl_pipeline() calls the NFL equivalent
+        # right after build_features() rather than this being a generic
+        # attach_*(games) hook: it needs feats' own home_franchise/away_franchise/
+        # game_id/date/season columns, not raw games, to do its own team-game
+        # ordinal join (see that module's docstring for why -- no date column in
+        # the raw cfbfastR release).
+        from sports.cfb.cfbfastr_features import build_trailing_success_features
+        feats = build_trailing_success_features(feats)
     wf = walk_forward_predict(feats, features.ML_FEATURE_COLS)
 
     history_df = feats.set_index("game_id").join(wf.predictions, how="left")
