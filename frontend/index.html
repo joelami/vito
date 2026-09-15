@@ -52,7 +52,11 @@
   <section x-show="route.page === 'suggestions'" x-cloak>
     <div class="page-header">
       <div class="page-title">Suggestions of the Day</div>
-      <div class="page-subtitle">Every currently-live, already-qualifying edge across every league — each one is a real row the harness snapshotted at the honest opening price in a real, scheduled game (see Live Track Record for how these grade out over time). Grouped by league; every league's model stays fully separate.</div>
+      <div class="page-subtitle">Every currently-live, qualifying edge — grouped by league.</div>
+      <details class="subtitle-detail">
+        <summary>How these are generated</summary>
+        <p>Each row is a real edge the harness snapshotted at the honest opening price in a real, scheduled game (see Live Track Record for how these grade out over time). Every league's model stays fully separate.</p>
+      </details>
       <div class="league-pills mb-16">
         <div class="league-pill" :class="{active: suggestions.leagueFilter === 'ALL'}" @click="suggestions.leagueFilter = 'ALL'">All</div>
         <template x-for="sp in leagueOrder" :key="sp">
@@ -178,7 +182,11 @@
   <section x-show="route.page === 'parlay'" x-cloak>
     <div class="page-header">
       <div class="page-title">Parlay Builder</div>
-      <div class="page-subtitle">Cross-game legs get a real combined edge (statistically independent, treated as an approximation). Same-game legs are refused a fabricated combined edge — correlation between them isn't modeled — see the warning on any parlay that includes one.</div>
+      <div class="page-subtitle">Combine qualifying edges into a parlay.</div>
+      <details class="subtitle-detail">
+        <summary>How combined edge is calculated</summary>
+        <p>Cross-game legs get a real combined edge (statistically independent, treated as an approximation). Same-game legs are refused a fabricated combined edge — correlation between them isn't modeled — see the warning on any parlay that includes one.</p>
+      </details>
     </div>
     <div class="page-content">
       <template x-if="parlay.loading">
@@ -340,8 +348,12 @@
   <section x-show="route.page === 'ratings'" x-cloak>
     <div class="page-header">
       <div class="page-title">Power Ratings</div>
-      <div class="page-subtitle">Every team, every league — current Elo-style power rating entering the next season, regressed toward the mean at the season boundary. Each league's rating scale is tuned separately (a 1550 in the NBA and a 1550 in the NHL are not the same thing) — switch leagues rather than reading one flat list across sports.</div>
-      <div class="page-subtitle" x-show="ratings.schedulerStatus" x-text="ratingsFreshnessLabel()" style="font-size:0.85em; opacity:0.75;"></div>
+      <div class="page-subtitle">Every team's current power rating, by league.</div>
+      <div class="page-subtitle" x-show="ratings.schedulerStatus" x-text="ratingsFreshnessLabel()" style="font-size:0.85em; opacity:0.75; margin-top:-14px;"></div>
+      <details class="subtitle-detail">
+        <summary>How ratings work</summary>
+        <p>Elo-style power rating entering the next season, regressed toward the mean at the season boundary. Each league's rating scale is tuned separately (a 1550 in the NBA and a 1550 in the NHL are not the same thing) — switch leagues rather than reading one flat list across sports.</p>
+      </details>
       <div class="league-pills mb-16">
         <template x-for="sp in leagueOrder" :key="sp">
           <div class="league-pill" :class="{active: ratings.league === sp}" @click="switchRatingsLeague(sp)" x-text="sp"></div>
@@ -384,7 +396,11 @@
   <section x-show="route.page === 'livetrack'" x-cloak>
     <div class="page-header">
       <div class="page-title">Live Track Record</div>
-      <div class="page-subtitle">How Vito is actually doing — every qualifying edge logged at the honest opening price in a real, scheduled game, settled against the real result. Grouped by league below; every league's model stays fully separate.</div>
+      <div class="page-subtitle">How Vito is actually doing, settled against real results.</div>
+      <details class="subtitle-detail">
+        <summary>What this tab is</summary>
+        <p>Every qualifying edge logged at the honest opening price in a real, scheduled game, settled against the real result. Grouped by league below; every league's model stays fully separate.</p>
+      </details>
     </div>
     <div class="page-content">
       <template x-if="livetrack.loading">
@@ -394,12 +410,11 @@
       <template x-if="!livetrack.loading">
         <div>
           <div class="honesty-banner">
-            <strong>Read this before the numbers below.</strong> This is a forward-testing log, not a backtest and not a list of bets you placed — every pick here was flagged by the model in a real, scheduled game, snapshotted at the opening line before kickoff, then settled once the game finished.
             <template x-if="liveRecord.data && liveRecord.data.overall.bets > 0">
-              <span> So far: <strong :class="liveRecord.data.overall.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="fmt(liveRecord.data.overall.roi_pct,2) + '%'"></strong> ROI on <strong x-text="fmtInt(liveRecord.data.overall.bets)"></strong> settled picks across every league. This sample is small — treat it as noise, not signal, until it grows.</span>
+              <span>So far: <strong :class="liveRecord.data.overall.roi_pct < 0 ? 'num-neg' : 'num-pos'" x-text="fmt(liveRecord.data.overall.roi_pct,2) + '%'"></strong> ROI on <strong x-text="fmtInt(liveRecord.data.overall.bets)"></strong> settled picks across every league. Small sample — treat as noise until it grows.</span>
             </template>
             <template x-if="!liveRecord.data || liveRecord.data.overall.bets === 0">
-              <span> Nothing has settled yet — this tab fills in automatically once real, scheduled games are played; there's nothing broken here.</span>
+              <span>Nothing has settled yet — this tab fills in automatically once real, scheduled games are played.</span>
             </template>
           </div>
 

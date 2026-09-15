@@ -148,6 +148,24 @@ a { color: inherit; }
 .page-header { padding: 28px 24px 0; }
 .page-title { font-family: var(--font-serif); font-size: 30px; font-weight: 500; letter-spacing: -0.3px; color: var(--text); margin-bottom: 6px; }
 .page-subtitle { color: var(--dim); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; margin-bottom: 22px; max-width: 760px; }
+
+/* Collapsible "why trust this" detail (added 2026-09-15 -- app owner:
+   "there's an overwhelming amount of text within the app"). Every page's
+   methodology/caveat prose used to sit fully expanded in page-subtitle
+   and .honesty-banner, every single visit, regardless of whether anyone
+   was reading it that time. Native <details>/<summary> -- zero JS, works
+   identically on touch (no hover-discovery problem a tooltip would have),
+   collapsed by default so the page's real information (the actual picks/
+   ratings/numbers) is what a viewer sees first. The full text is NEVER
+   deleted, only deferred one click away -- same honesty, less always-on
+   weight. */
+.subtitle-detail { max-width: 760px; margin-bottom: 22px; font-family: var(--font-mono); }
+.subtitle-detail summary { color: var(--muted); font-size: 11px; cursor: pointer; user-select: none; list-style: none; }
+.subtitle-detail summary::-webkit-details-marker { display: none; }
+.subtitle-detail summary::before { content: '▸ '; }
+.subtitle-detail[open] summary::before { content: '▾ '; }
+.subtitle-detail summary:hover { color: var(--dim); }
+.subtitle-detail p { color: var(--dim); font-size: 11.5px; line-height: 1.65; margin: 8px 0 0; }
 .page-content { padding: 0 24px 44px; }
 
 /* ── Cards ──────────────────────────────────────────────────────────── */
