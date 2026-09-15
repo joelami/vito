@@ -35,6 +35,21 @@ def moneyline_row(home_odds, away_odds, rating_diff_pre=0.0):
     }
 
 
+def total_row(predicted_total=52.0, total_line=48.5, over_odds=1.91, under_odds=1.91):
+    """Minimal row: only total columns populated, so evaluate_game's
+    moneyline/spread blocks harmlessly no-op -- keeps these tests focused
+    on the total-market confidence gate."""
+    return {
+        "rating_diff_pre": 0.0,
+        "predicted_margin": 0.0,
+        "predicted_total": predicted_total,
+        "naive_total": predicted_total,
+        "Total Score Close": total_line,
+        "Total Score Over Close": over_odds,
+        "Total Score Under Close": under_odds,
+    }
+
+
 class TestMaxMoneylineUnderdogOdds:
     def test_cfb_extreme_underdog_side_excluded(self):
         # A real shape: home is a big favorite (1.10), away is a real
@@ -78,6 +93,33 @@ class TestMaxMoneylineUnderdogOdds:
         assert ("moneyline", "away") in sides
 
 
+class TestTotalUnvalidatedSports:
+    def test_cfb_total_gets_unvalidated_confidence(self):
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="CFB",
+        )
+        totals = [o for o in opps if o.market == "total"]
+        assert len(totals) == 2  # over and under
+        assert all(o.confidence == "Unvalidated" for o in totals)
+
+    def test_nfl_total_unaffected(self):
+        # NFL is in TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS (the real, validated
+        # fix) -- must keep getting a real graded tier, not Unvalidated.
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="NFL",
+        )
+        totals = [o for o in opps if o.market == "total"]
+        assert all(o.confidence != "Unvalidated" for o in totals)
+
+    def test_nba_total_unaffected(self):
+        # Not in TOTAL_UNVALIDATED_SPORTS -- confirms the CFB gate doesn't leak.
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="NBA",
+        )
+        totals = [o for o in opps if o.market == "total"]
+        assert all(o.confidence != "Unvalidated" for o in totals)
+
+
 @pytest.fixture
 def conn():
     c = sqlite3.connect(":memory:")
@@ -104,6 +146,15 @@ def confidence_of(conn, id):
 
 
 class TestReconcileUnvalidatedConfidence:
+    def test_relabels_stale_cfb_total_pending_picks(self, conn):
+        # CFB total was gated into TOTAL_UNVALIDATED_SPORTS on 2026-09-14 --
+        # same staleness pattern as spread's 2026-09-03 gate: a pending
+        # pick logged before that shipped should get caught here too.
+        insert_pick(conn, 1, "CFB", "total", settled=0, confidence="High")
+        changed = edge_finder.reconcile_unvalidated_confidence(conn)
+        assert changed == 1
+        assert confidence_of(conn, 1) == "Unvalidated"
+
     def test_relabels_stale_unvalidated_sport_market(self, conn):
         # CFB is in SPREAD_UNVALIDATED_SPORTS -- a pending pick logged
         # before that gate shipped should get caught.

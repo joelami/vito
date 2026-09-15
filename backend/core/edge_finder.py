@@ -97,9 +97,11 @@ SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS = {"NHL"}
 # sports (same "under beats over" direction, each with its own real
 # effect size and its own season-based split-half stability check), the
 # same two-sport-independent-confirmation bar moneyline's fix was held to.
-# NOT extended to NBA/NHL/CFB total -- the standing audit already shows
-# those three are monotonic (not backwards) under the OLD confidence_tier(),
-# so there is no problem there to fix and no reason to touch them.
+# NOT extended to NBA/NHL total -- the standing audit shows those two are
+# monotonic (not backwards) under the OLD confidence_tier(), so there is
+# no problem there to fix and no reason to touch them. CFB total used to
+# be in this same "monotonic, leave alone" bucket too -- see
+# TOTAL_UNVALIDATED_SPORTS below for why that's no longer true.
 TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 
 # App-owner decision (2026-09-03), after real investigation found no
@@ -110,6 +112,25 @@ TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 # edge threshold), just without a graded confidence claim.
 MONEYLINE_UNVALIDATED_SPORTS = {"NBA"}
 SPREAD_UNVALIDATED_SPORTS = {"NBA", "MLB", "CFB"}
+
+# Adopted 2026-09-14 (app owner decision, after studying the Sept 12-14
+# CFB/NFL weekend -- see decision_log.jsonl "cfb_total_confidence_backwards_
+# live"): CFB total was previously believed monotonic (checked against the
+# static historical backtest, z=-0.34, not significant -- see the
+# comment above TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS). Re-checked against the
+# real, growing LIVE forward-test population once it reached a real sample
+# (n=52 High / n=51 Medium, both above audit_live_forward_test's own
+# min_bets_for_verdict=15): High hit=32.7%/ROI=-37.25% badly UNDERPERFORMS
+# Medium hit=51.0%/ROI=-2.12%, z=-1.90, stable direction across both
+# time-halves of the sample (-21.56pp, -67.49pp) and getting STRONGER over
+# time, not weaker -- the opposite of what noise does. Still short of this
+# project's ~3.2 adopt bar on its own (logged as `watch`, shrinkage weight
+# 0.537), but the app owner made the precautionary call to gate it now
+# rather than wait, same honest-badge-over-wrong-badge reasoning as the
+# four sports/markets above -- CFB total has always used the old, never-
+# validated-for-CFB-specifically confidence_tier(), so this closes a real
+# gap rather than reversing a proven-good scheme.
+TOTAL_UNVALIDATED_SPORTS = {"CFB"}
 
 # Adopted 2026-09-05 (see decision_log.jsonl, sports/cfb/research_moneyline_
 # underdog_odds_subgroup.py): a real, DIFFERENT kind of problem from the
@@ -151,9 +172,10 @@ MAX_MONEYLINE_UNDERDOG_ODDS = {"CFB": 10.0}
 def reconcile_unvalidated_confidence(conn) -> int:
     """Sweeps every pending (settled=0) forward_pick and forces confidence
     to 'Unvalidated' for any (sport, market) currently gated into
-    MONEYLINE_UNVALIDATED_SPORTS / SPREAD_UNVALIDATED_SPORTS but not
-    already labeled that way -- self-healing the exact staleness bug
-    described above, idempotent, cheap enough to run every harness cycle."""
+    MONEYLINE_UNVALIDATED_SPORTS / SPREAD_UNVALIDATED_SPORTS /
+    TOTAL_UNVALIDATED_SPORTS but not already labeled that way --
+    self-healing the exact staleness bug described above, idempotent,
+    cheap enough to run every harness cycle."""
     changed = 0
     for sport in MONEYLINE_UNVALIDATED_SPORTS:
         cur = conn.execute(
@@ -166,6 +188,13 @@ def reconcile_unvalidated_confidence(conn) -> int:
         cur = conn.execute(
             "UPDATE forward_picks SET confidence='Unvalidated' "
             "WHERE sport=? AND market='spread' AND settled=0 AND confidence != 'Unvalidated'",
+            (sport,),
+        )
+        changed += cur.rowcount
+    for sport in TOTAL_UNVALIDATED_SPORTS:
+        cur = conn.execute(
+            "UPDATE forward_picks SET confidence='Unvalidated' "
+            "WHERE sport=? AND market='total' AND settled=0 AND confidence != 'Unvalidated'",
             (sport,),
         )
         changed += cur.rowcount
@@ -291,6 +320,8 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
             if sport_u in TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS:
                 conf_over = ensemble.total_side_confidence_tier("over")
                 conf_under = ensemble.total_side_confidence_tier("under")
+            elif sport_u in TOTAL_UNVALIDATED_SPORTS:
+                conf_over = conf_under = ensemble.unvalidated_confidence_tier()
             else:
                 conf_over = conf_under = ensemble.confidence_tier(tot["ml_prob"], tot["naive_prob"])
             opps.append(_opportunity("total", "over", total_line, tot["blended_prob"],
