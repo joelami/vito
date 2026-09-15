@@ -22,6 +22,21 @@ MOV_MULT_DIVISOR = 2.2
 # runtime, this is just the starting scale.
 ELO_POINTS_PER_MARGIN = 25.0
 
+# ---------- Ensemble blend weight overrides ----------
+# Read by pipeline.py's _sport_ensemble_config() -- see that function's own
+# docstring for the full reasoning. Adopted 2026-09-14 via
+# core/research_ensemble_blend_weight.py after NFL's ML side gained real
+# play-level EPA/success-rate features (see sports/nfl/nflfastr_features.py):
+# a Brier-score sweep found a real, split-half-stable improvement for SPREAD
+# specifically when shifting weight toward the ML side (full-sample optimum
+# sat around 0.2-0.25; 0.3 chosen as a moderate, conservative pick rather
+# than fitting the exact single-sample minimum -- the two season-halves'
+# OWN individual optima disagreed on the precise value, though both
+# unambiguously preferred less Elo weight than the old flat 0.5). Moneyline
+# and total showed no stable improvement and are deliberately NOT
+# overridden here -- they keep EnsembleConfig's own 0.5 default.
+WEIGHT_ELO_SPREAD = 0.3
+
 # ---------- Season boundaries ----------
 # NFL seasons run Sept -> Feb. A game in Jan/Feb belongs to the season that
 # started the previous autumn (e.g. Feb 2026 Super Bowl = "2025 season").

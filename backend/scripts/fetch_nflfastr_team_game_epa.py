@@ -62,7 +62,7 @@ def aggregate_season(season: int) -> pd.DataFrame:
     pbp = nfl.import_pbp_data(
         [season],
         columns=["game_id", "season", "week", "posteam", "defteam", "home_team", "away_team",
-                 "play_type", "epa", "success"],
+                 "play_type", "epa", "success", "game_date"],
         downcast=True,
     )
     print(f"[fetch_nflfastr] {season}: {len(pbp):,} plays downloaded in {time.time()-t0:.1f}s")
@@ -86,8 +86,23 @@ def aggregate_season(season: int) -> pd.DataFrame:
                 "def_epa_per_play_allowed": deff["epa"].mean() if len(deff) else None,
                 "def_success_rate_allowed": deff["success"].mean() if len(deff) else None,
                 "def_plays": len(deff),
+                # Real regression, found and fixed 2026-09-15: this key went
+                # missing during this session's fetch_and_save() refactor,
+                # which silently dropped "game_date" from the requested pbp
+                # columns -- the 32 real rows fetched by that refactored
+                # code (2026 season, via the new scheduler refresh path)
+                # came back with gameday=NaN, which get_current_trailing_epa()
+                # sorts by; caught by direct inspection before it could
+                # quietly corrupt trailing EPA ordering for the live season.
+                "gameday": g["game_date"].iloc[0],
             })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    # Guards the exact regression this key's own comment above describes --
+    # fails loudly, at fetch time, rather than silently shipping a row
+    # get_current_trailing_epa()'s sort-by-gameday would then mis-order.
+    assert df.empty or df["gameday"].notna().all(), \
+        f"season {season}: {df['gameday'].isna().sum()} row(s) with no gameday -- a real regression, not expected data"
+    return df
 
 
 def fetch_and_save(start: int, end: int, force_seasons: set = frozenset()) -> pd.DataFrame:

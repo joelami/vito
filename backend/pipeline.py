@@ -35,6 +35,37 @@ def records(df: pd.DataFrame) -> list:
     return json.loads(df.replace([np.inf, -np.inf], np.nan).fillna(0).to_json(orient="records"))
 
 
+def _sport_ensemble_config(sport_config) -> ensemble.EnsembleConfig:
+    """
+    EnsembleConfig() with per-sport blend-weight overrides, read via
+    getattr with EnsembleConfig's own dataclass defaults (0.5) as the
+    fallback -- same additive convention as PowerRatingConfig's
+    low_history_* fields (see build_pipeline()'s own comment on those).
+    Every sport's config.py that doesn't define these three attributes
+    (every one except NFL, as of this writing) gets byte-identical
+    EnsembleConfig() behavior to before.
+
+    NFL's WEIGHT_ELO_SPREAD override: adopted via core/research_ensemble_blend_weight.py
+    (2026-09-14, see decision_log.jsonl) -- the flat 0.5 Elo:ML blend
+    weight was never re-validated after NFL's ML side gained real
+    play-level EPA/success-rate features. Brier-score sweep (calibration
+    against real outcomes, not a bare ROI search -- see that script's own
+    docstring for why ROI alone would risk the exact overfitting pattern
+    this project's "fake_threshold_tweak" guardrail test exists to catch)
+    found a real, split-half-STABLE improvement for SPREAD only (moving
+    toward more ML weight) -- moneyline and total showed no stable
+    improvement and stay at the 0.5 default. CFB was also tested and
+    showed no stable improvement on any of the three markets -- real,
+    honest null result, not skipped.
+    """
+    kwargs = {}
+    for field in ("weight_elo_moneyline", "weight_elo_spread", "weight_ml_total"):
+        override = getattr(sport_config, field.upper(), None)
+        if override is not None:
+            kwargs[field] = override
+    return ensemble.EnsembleConfig(**kwargs)
+
+
 def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     games = load_games()
     games = attach_weather(games)  # disk-cached — see sports/nfl/weather.py
@@ -78,7 +109,7 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     oos_df = history_df.dropna(subset=["predicted_margin"])
 
     stds = ensemble.compute_residual_stds(oos_df, nfl_config.ELO_POINTS_PER_MARGIN)
-    ecfg = ensemble.EnsembleConfig()
+    ecfg = _sport_ensemble_config(nfl_config)
     bcfg = backtest.BacktestConfig(min_edge_pct=3.0)
 
     bets_df = backtest.run_backtest(oos_df, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg, bcfg, sport="NFL")
@@ -226,7 +257,7 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
     oos_df = history_df.dropna(subset=["predicted_margin"])
 
     stds = ensemble.compute_residual_stds(oos_df, config.ELO_POINTS_PER_MARGIN)
-    ecfg = ensemble.EnsembleConfig()
+    ecfg = _sport_ensemble_config(config)
     # unlike NFL (real open-vs-close data), every other sport module built this session
     # has only a single odds snapshot — populated into the "*Close" columns by convention
     # (see each sport's odds loader/verify.py) — so "Close" is the only real price_point
