@@ -57,6 +57,29 @@ tested the same session and found a clean null - fit moved less than the
 noise floor in both directions - matching the same "well-motivated but
 didn't move anything" outcome trailing faceoff win% produced, and was
 therefore NOT wired in here, per that same precedent.
+
+ADOPTED 2026-09-15 via core/research.py (see decision_log.jsonl,
+"nhl_moneypuck_trailing_xg_features", and sports/nhl/moneypuck_xg_
+features.py's own module docstring): trailing expected-goals-for/against
+(`xg_for_l10`/`xg_against_l10`), built from MoneyPuck's real per-skater
+on-ice xG data (already downloaded to Datasets/NHL/2008_to_2024 copy 2.csv
++ 2025 copy.csv) - the direct successor to shot_diff_l10 above, separating
+shot VOLUME (Corsi/Fenwick) from shot QUALITY (xG weights each shot by its
+real historical conversion rate given location/type/situation/danger).
+Measured result: total_corr improved 0.0849->0.0953 (+0.0104, well beyond
+CORR_NOISE_FLOOR), margin_corr moved +0.0001 (within noise), ROI moved
+-0.05pp (well within its own ~0.88pp stderr - NOT an ROI-chasing artifact;
+if anything ROI ticked down while fit genuinely improved, the opposite of
+the `suspicious` overfitting signature). Confirmed stable across a season
+split-half check (required, not optional - see
+sports/nhl/research_xg_features.py's own docstring for why): neither
+margin_corr nor total_corr degraded past the noise floor in either half
+(first half total_corr -0.0019, second half +0.0035, both within noise;
+margin_corr flat-to-slightly-down in both, also within noise). Real,
+honestly-reported coverage gap: only 76.0% of games have a matched
+MoneyPuck game (2008-2024 + 2025 vs. this project's 2004-2026 NHL window);
+the rest fall back to the league-average xg_for/xg_against, same convention
+as every other trailing feature's cold start here.
 """
 
 import pandas as pd
@@ -318,6 +341,35 @@ def current_form_snapshot(games: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, is_playoff=False,
+                            week=None, **_ignored) -> dict:
+    """
+    Live-scoring counterpart for the trailing xG feature (see
+    moneypuck_xg_features.py, ADOPTED 2026-09-15 via "nhl_moneypuck_
+    trailing_xg_features" -- see decision_log.jsonl) -- real gap this
+    closes, the same class NFL's own matchup.py hit for its trailing EPA
+    feature (see decision_log.jsonl, "nfl_nflverse_trailing_epa_features"):
+    core/matchup.py's generic build_matchup_feature_row() dynamically fills
+    any ML_FEATURE_COLS column it doesn't already know about with a neutral
+    default (0.0), which for xg_for_l10/xg_against_l10 would silently feed
+    the model a wildly wrong value on every live NHL pick (0.0 expected
+    goals is nowhere close to a real team-game rate, ~0.78 in this data) --
+    wired here proactively, the same way CFB's own extra_matchup_features()
+    wires get_current_trailing_success().
+
+    home_fr/away_fr here are NHL's own canonical numeric team_id (see
+    config.py's module docstring: NHL's "franchise" identity literally IS
+    the numeric team_id, unlike every other sport's string franchise name).
+    """
+    from .moneypuck_xg_features import get_current_trailing_xg
+    home_xg = get_current_trailing_xg(home_fr)
+    away_xg = get_current_trailing_xg(away_fr)
+    return {
+        "home_xg_for_l10": home_xg["xg_for_l10"], "home_xg_against_l10": home_xg["xg_against_l10"],
+        "away_xg_for_l10": away_xg["xg_for_l10"], "away_xg_against_l10": away_xg["xg_against_l10"],
+    }
+
+
 ML_FEATURE_COLS = [
     "rating_diff_pre", "rest_diff", "home_rest_days", "away_rest_days",
     "home_ats_pct_l10", "away_ats_pct_l10", "home_win_pct_l10", "away_win_pct_l10",
@@ -336,4 +388,15 @@ ML_FEATURE_COLS = [
     # beyond CORR_NOISE_FLOOR (see features.py's module docstring for the
     # full measured result).
     "home_pk_pct_l10", "away_pk_pct_l10",
+    # Adopted 2026-09-15 via core/research.py hypothesis test (see
+    # decision_log.jsonl, "nhl_moneypuck_trailing_xg_features", and
+    # moneypuck_xg_features.py's own module docstring) - real trailing
+    # expected-goals-for/against from MoneyPuck's per-skater on-ice xG data,
+    # the direct successor to shot_diff_l10 above (separates shot VOLUME
+    # from shot QUALITY). Genuinely improved total_corr beyond
+    # CORR_NOISE_FLOOR (+0.0104 full-sample), margin_corr flat (within
+    # noise), ROI moved -0.05pp (within its own stderr, i.e. NOT an
+    # ROI-chasing artifact) - confirmed stable across a season split-half
+    # (neither corr degraded past the noise floor in either half).
+    "home_xg_for_l10", "home_xg_against_l10", "away_xg_for_l10", "away_xg_against_l10",
 ]
