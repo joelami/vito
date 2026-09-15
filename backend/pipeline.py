@@ -26,6 +26,7 @@ from sports.nfl import config as nfl_config
 from sports.nfl.loader import load_games
 from sports.nfl.features import build_features, current_form_snapshot, ML_FEATURE_COLS
 from sports.nfl.weather import attach_weather
+from sports.nfl.nflfastr_features import build_trailing_epa_features
 
 
 def records(df: pd.DataFrame) -> list:
@@ -62,6 +63,14 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
         ),
     )
     feats = build_features(games, rr.history)
+    # Adopted 2026-09-14 (see decision_log.jsonl, sports/nfl/research_
+    # nflfastr_epa_features.py): real trailing EPA/success-rate features
+    # built from free nflverse play-by-play data -- validated via this
+    # project's standard walk-forward Hypothesis framework (real fit
+    # improvement, margin_corr +0.0073/total_corr +0.0052, both past the
+    # noise floor; ROI flat, not suspicious). ML_FEATURE_COLS below
+    # already includes the 8 new columns this adds.
+    feats = build_trailing_epa_features(feats)
     wf = walk_forward_predict(feats, ML_FEATURE_COLS)
 
     # full history (left join) for browsing; OOS-only (inner join) for backtest/residual stats

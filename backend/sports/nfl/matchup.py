@@ -10,6 +10,7 @@ import pandas as pd
 from . import config as nfl_config
 from .features import naive_score_features, pythagorean_win_pct
 from .weather import current_stadium_row
+from .nflfastr_features import get_current_trailing_epa
 
 
 def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, game_date,
@@ -49,6 +50,8 @@ def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, ga
     # fallback (documented limitation, see weather.current_stadium_row's docstring)
     season = nfl_config.season_for_date(game_date)
     weather = current_stadium_row(home_fr, season, game_date)
+    home_epa = get_current_trailing_epa(home_fr)
+    away_epa = get_current_trailing_epa(away_fr)
     return pd.DataFrame([{
         "rating_diff_pre": home_rating - away_rating,
         "rest_diff": home_rest - away_rest,
@@ -68,6 +71,14 @@ def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, ga
         "is_playoff": is_playoff, "is_neutral_venue": is_neutral_venue,
         "game_temp_f": weather["game_temp_f"], "game_wind_mph": weather["game_wind_mph"],
         "game_precip_mm": weather["game_precip_mm"], "is_dome": weather["is_dome"],
+        "home_off_epa_per_play_trail": home_epa["off_epa_per_play"],
+        "home_off_success_rate_trail": home_epa["off_success_rate"],
+        "home_def_epa_per_play_allowed_trail": home_epa["def_epa_per_play_allowed"],
+        "home_def_success_rate_allowed_trail": home_epa["def_success_rate_allowed"],
+        "away_off_epa_per_play_trail": away_epa["off_epa_per_play"],
+        "away_off_success_rate_trail": away_epa["off_success_rate"],
+        "away_def_epa_per_play_allowed_trail": away_epa["def_epa_per_play_allowed"],
+        "away_def_success_rate_allowed_trail": away_epa["def_success_rate_allowed"],
     }]), home_rating, away_rating, naive_total
 
 

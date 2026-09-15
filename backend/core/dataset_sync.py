@@ -116,5 +116,48 @@ def sync_datasets(force: bool = False) -> None:
     print(f"[dataset_sync] done — {downloaded} files, {total_bytes / 1e9:.2f}GB total.")
 
 
+def sync_file_if_missing(key: str) -> None:
+    """
+    Real gap this closes (2026-09-14): sync_datasets() above is a one-time,
+    all-or-nothing check -- `_already_populated()` only looks at 3 sentinel
+    files, so an environment whose Datasets/ volume already has content
+    (any real production deploy after the first) silently skips the ENTIRE
+    download forever, including any NEW file added to the R2 bucket later
+    (e.g. Datasets/NFL/nflfastr_team_game_epa.csv, added well after this
+    project's original dataset set). Uploading a new file to R2 alone does
+    NOT get it onto an already-populated production volume -- this is the
+    targeted fix: check for one specific file, download just that one if
+    it's missing, regardless of whether the bulk sentinel check already
+    passed. Cheap to call unconditionally on every boot (a HEAD-equivalent
+    check via a failed/skipped download attempt is the only cost once the
+    file is already present). Same graceful no-op-without-crashing
+    behavior as sync_datasets() if R2 credentials aren't set.
+    """
+    dest = DATASETS_DIR / key
+    if dest.exists():
+        return
+
+    account_id = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+    bucket = os.environ.get("R2_BUCKET_NAME")
+    if not all([account_id, access_key, secret_key, bucket]):
+        print(f"[dataset_sync] {key} missing and R2 credentials not set -- skipping "
+              f"(local dev without this file just won't have it).", file=sys.stderr)
+        return
+
+    import boto3
+    client = boto3.client(
+        "s3", endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name="auto",
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        client.download_file(bucket, key, str(dest))
+        print(f"[dataset_sync] downloaded {key} (was missing on an already-populated volume).")
+    except Exception as e:
+        print(f"[dataset_sync] failed to download {key}: {e}", file=sys.stderr)
+
+
 if __name__ == "__main__":
     sync_datasets(force="--force" in sys.argv)

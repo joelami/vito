@@ -174,7 +174,18 @@ def summarize(bets: pd.DataFrame, group_cols: list = None) -> pd.DataFrame:
         })
 
     if group_cols:
-        return df.groupby(group_cols, observed=True).apply(_agg, include_groups=False).reset_index()
+        # Real cross-version bug found 2026-09-14: `include_groups=False`
+        # doesn't exist before pandas 2.2, so this crashed outright on an
+        # older pandas resolved locally (a transitive dependency of a
+        # newly pip-installed package pulled a different pandas version
+        # in -- this project's requirements.txt never pinned one).
+        # Dropped entirely rather than made conditional: _agg() above
+        # never reads any of `group_cols` from `g` in the first place, so
+        # whether the grouping columns are included in `g` (pre-2.2
+        # default) or excluded (2.2+ default) changes nothing about this
+        # function's actual output -- there was never a real reason for
+        # this to be version-sensitive.
+        return df.groupby(group_cols, observed=True).apply(_agg).reset_index()
     return _agg(df).to_frame().T
 
 

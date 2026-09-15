@@ -77,8 +77,15 @@ def compute_history_opportunities(pipeline: dict) -> dict:
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 def startup():
-    from core.dataset_sync import sync_datasets
+    from core.dataset_sync import sync_datasets, sync_file_if_missing
     sync_datasets()  # no-op if Datasets/ is already present (local dev, or a persisted volume)
+    # sync_datasets() above skips entirely once Datasets/ has ANY real
+    # content (sentinel-file check) -- which means a new file added to the
+    # R2 bucket after a volume's first population never reaches it. This
+    # is exactly that case for the nflverse EPA data (added 2026-09-14,
+    # well after this project's original dataset set) -- see
+    # core.dataset_sync.sync_file_if_missing's own docstring.
+    sync_file_if_missing("NFL/nflfastr_team_game_epa.csv")
 
     # Real incident this closes (2026-09-02, and apparently recurring): a
     # Railway Volume backing database.DB_PATH gets recreated (an

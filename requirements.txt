@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-pandas
+pandas>=2.2  # real regression 2026-09-14: an unpinned version let a transitive dependency silently downgrade it locally
 numpy
 scikit-learn
 openpyxl

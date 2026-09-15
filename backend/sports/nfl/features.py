@@ -203,4 +203,15 @@ ML_FEATURE_COLS = [
     "naive_total", "naive_margin", "home_pyth_pct", "away_pyth_pct", "pyth_pct_diff",
     "home_streak", "away_streak", "is_divisional", "is_playoff", "is_neutral_venue",
     "game_temp_f", "game_wind_mph", "game_precip_mm", "is_dome",
+    # Adopted 2026-09-14 (real nflverse play-by-play, see sports/nfl/
+    # nflfastr_features.py and decision_log.jsonl) -- trailing EPA/play
+    # and success rate, offense and defense, both sides. The first
+    # play-level efficiency signal this feature set has ever had; every
+    # other feature above is derived from box-score points, which
+    # conflates real offensive/defensive quality with special-teams TDs,
+    # turnover-return luck, and garbage-time scoring.
+    "home_off_epa_per_play_trail", "home_off_success_rate_trail",
+    "home_def_epa_per_play_allowed_trail", "home_def_success_rate_allowed_trail",
+    "away_off_epa_per_play_trail", "away_off_success_rate_trail",
+    "away_def_epa_per_play_allowed_trail", "away_def_success_rate_allowed_trail",
 ]
