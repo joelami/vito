@@ -153,6 +153,7 @@
                               <span class="home" x-text="p.home_team"></span>
                             </div>
                             <div class="probable-line" x-show="sp === 'MLB'" x-text="probablesFor(p) ? ('SP: ' + probableLabel(probablesFor(p).away) + ' @ ' + probableLabel(probablesFor(p).home)) : ''"></div>
+                            <div class="probable-line" x-show="predictedScoreLabel(p)" x-text="predictedScoreLabel(p)" title="Vito's own predicted final score for this game — a second, more literal way to read how confident the model actually is, alongside the Confidence badge."></div>
                           </td>
                           <td data-label="Market / Side" x-text="pickSideLine(p)"></td>
                           <td class="num" data-label="Odds" x-text="fmt(p.market_odds,2)"></td>
@@ -340,6 +341,7 @@
     <div class="page-header">
       <div class="page-title">Power Ratings</div>
       <div class="page-subtitle">Every team, every league — current Elo-style power rating entering the next season, regressed toward the mean at the season boundary. Each league's rating scale is tuned separately (a 1550 in the NBA and a 1550 in the NHL are not the same thing) — switch leagues rather than reading one flat list across sports.</div>
+      <div class="page-subtitle" x-show="ratings.schedulerStatus" x-text="ratingsFreshnessLabel()" style="font-size:0.85em; opacity:0.75;"></div>
       <div class="league-pills mb-16">
         <template x-for="sp in leagueOrder" :key="sp">
           <div class="league-pill" :class="{active: ratings.league === sp}" @click="switchRatingsLeague(sp)" x-text="sp"></div>

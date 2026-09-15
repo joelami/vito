@@ -204,3 +204,45 @@ class TestReconcileUnvalidatedConfidence:
         second = edge_finder.reconcile_unvalidated_confidence(conn)
         assert first == 2
         assert second == 0
+
+
+class TestPredictedScore:
+    """Added 2026-09-15 (app owner: 'I'm also curious if the model can
+    start giving out its predicted score')."""
+
+    def test_every_opportunity_from_one_game_carries_the_same_predicted_score(self):
+        row = moneyline_row(home_odds=1.50, away_odds=2.80)
+        row["predicted_margin"] = 7.0
+        row["predicted_total"] = 41.0
+        opps = edge_finder.evaluate_game(row, make_stds(), elo_points_per_margin=14.0,
+                                          cfg=ensemble.EnsembleConfig(), sport="NFL")
+        assert len(opps) == 2
+        for o in opps:
+            assert o.predicted_margin == 7.0
+            assert o.predicted_total == 41.0
+
+    def test_home_away_score_derivation_is_correct(self):
+        # margin = home - away, total = home + away -- home 7 up on a 41
+        # total means home=24, away=17.
+        row = moneyline_row(home_odds=1.50, away_odds=2.80)
+        row["predicted_margin"] = 7.0
+        row["predicted_total"] = 41.0
+        opps = edge_finder.evaluate_game(row, make_stds(), elo_points_per_margin=14.0,
+                                          cfg=ensemble.EnsembleConfig(), sport="NFL")
+        assert opps[0].predicted_home_score == pytest.approx(24.0)
+        assert opps[0].predicted_away_score == pytest.approx(17.0)
+        # Round-trip sanity: they should reconstruct the inputs exactly.
+        assert opps[0].predicted_home_score - opps[0].predicted_away_score == pytest.approx(7.0)
+        assert opps[0].predicted_home_score + opps[0].predicted_away_score == pytest.approx(41.0)
+
+    def test_present_on_spread_and_total_opportunities_too_not_just_moneyline(self):
+        row = total_row(predicted_total=52.0)
+        row["predicted_margin"] = -3.0
+        opps = edge_finder.evaluate_game(row, make_stds(), elo_points_per_margin=14.0,
+                                          cfg=ensemble.EnsembleConfig(), sport="NFL")
+        assert len(opps) == 2  # over, under
+        for o in opps:
+            assert o.market == "total"
+            assert o.predicted_margin == -3.0
+            assert o.predicted_home_score is not None
+            assert o.predicted_away_score is not None

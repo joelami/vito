@@ -45,6 +45,14 @@ PICK_COLUMNS = [
     "sport", "espn_event_id", "date", "home_team", "away_team", "market", "side", "line",
     "model_prob", "market_odds", "market_fair_prob", "edge_pct", "confidence", "kelly_stake",
     "snapshotted_at", "settled", "result", "profit_units", "clv_pct", "settled_at",
+    # Added 2026-09-15 alongside forward_picks' own new columns (see
+    # database.py's _add_predicted_score_columns) -- an R2-archived pick
+    # object uploaded BEFORE this change won't have these keys; restore_gap()
+    # below handles that the same non-fatal, per-object way it already
+    # handles any other single-object restore failure (logged, skipped,
+    # doesn't block the rest of the restore) rather than needing every old
+    # archived object rewritten.
+    "predicted_margin", "predicted_total", "predicted_home_score", "predicted_away_score",
 ]
 
 

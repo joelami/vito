@@ -196,6 +196,10 @@ function app() {
       sort: 'rank',
       order: 'asc',
       league: 'NFL',
+      // Real freshness state (added 2026-09-15, see main.py's
+      // /api/admin/scheduler-status) -- so "is this stale" is a checkable
+      // fact on the page itself, not a guess.
+      schedulerStatus: null,
     },
 
     livetrack: {
@@ -445,6 +449,18 @@ function app() {
       return marketLabel(p.market) + ' ' + sideLabel(p) + lineDisplay(p);
     },
 
+    // Real, checkable form of "how confident is the model" alongside the
+    // Confidence badge (added 2026-09-15, app owner's own suggestion) --
+    // only present on freshly-computed suggestions (core/edge_finder.py's
+    // BetOpportunity), not yet on picks read back from forward_picks (the
+    // DB doesn't persist predicted score yet -- a real, separate follow-up,
+    // not silently missing), so this returns '' rather than a broken
+    // "undefined - undefined" line for that case.
+    predictedScoreLabel(p) {
+      if (p.predicted_home_score == null || p.predicted_away_score == null) return '';
+      return `Vito: ${p.away_team} ${fmt(p.predicted_away_score, 1)} – ${p.home_team} ${fmt(p.predicted_home_score, 1)}`;
+    },
+
     // ── Parlay (suggested + manual builder) ─────────────────────────────
     legKey(p) {
       return `${p.sport}:${p.espn_event_id}:${p.market}:${p.side}:${p.line ?? ''}`;
@@ -506,6 +522,23 @@ function app() {
       } catch (e) {
         this.toast('Failed to load ratings: ' + e.message, 'error');
       } finally { this.ratings.loading = false; }
+      // Best-effort -- a failure here should never block the ratings list
+      // itself from rendering, it only powers the "last updated" line.
+      try {
+        this.ratings.schedulerStatus = await apiGet('/api/admin/scheduler-status');
+      } catch (e) { /* freshness indicator just won't show -- not fatal */ }
+    },
+
+    ratingsFreshnessLabel() {
+      const s = this.ratings.schedulerStatus;
+      if (!s) return '';
+      if (s.enabled === false) return 'Live refresh is OFF on this deployment (ENABLE_SCHEDULER not set) — ratings are frozen at whatever they were on last deploy.';
+      if (!s.last_full_run_ok_sports || !s.last_full_run_ok_sports.includes(this.ratings.league)) {
+        return s.last_full_run_utc
+          ? `Last refresh (${s.last_full_run_utc}) did not include ${this.ratings.league} — check for an error.`
+          : 'No refresh has completed yet since this server started.';
+      }
+      return `Last refreshed ${s.last_full_run_utc} UTC (next full run ~${s.full_run_at_utc} UTC daily)`;
     },
 
     switchRatingsLeague(sp) {

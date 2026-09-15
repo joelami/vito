@@ -148,3 +148,15 @@ def get_current_qb_form(franchise: str) -> dict:
     else:
         continuity = 1.0 if last_two[0] == last_two[1] else 0.0
     return {"qb_epa_trail": epa_trail, "qb_continuity_flag": continuity}
+
+
+def reset_cache() -> None:
+    """Same real staleness bug as sports/nfl/nflfastr_features.py's
+    reset_caches() -- see that function's docstring. _qb_starts_cache
+    freezes after its first population and never picks up new seasons'
+    data on its own; called every scheduled full run (scheduler.py's
+    _run_full()) for consistency with the rest of this project's kept-
+    but-not-yet-adopted infrastructure, even though this module isn't
+    currently wired into ML_FEATURE_COLS."""
+    global _qb_starts_cache
+    _qb_starts_cache = None

@@ -164,11 +164,13 @@ def snapshot_new_picks(pipeline: dict, sport: str, events: list) -> int:
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO forward_picks "
                     "(sport, espn_event_id, date, home_team, away_team, market, side, line, "
-                    "model_prob, market_odds, market_fair_prob, edge_pct, confidence, kelly_stake) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "model_prob, market_odds, market_fair_prob, edge_pct, confidence, kelly_stake, "
+                    "predicted_margin, predicted_total, predicted_home_score, predicted_away_score) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sport, e["espn_event_id"], e["date"], e["home_team"], e["away_team"],
                      o.market, o.side, o.line, o.model_prob, o.market_odds, o.market_fair_prob,
-                     o.edge_pct, o.confidence, o.kelly_stake),
+                     o.edge_pct, o.confidence, o.kelly_stake,
+                     o.predicted_margin, o.predicted_total, o.predicted_home_score, o.predicted_away_score),
                 )
                 if cur.rowcount:
                     logged += 1

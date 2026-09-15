@@ -94,6 +94,24 @@ def refresh_nfl_epa_data() -> None:
 def refresh_all() -> None:
     """Called once per day from scheduler.py's _run_full(), before the
     day's pipelines are rebuilt, so the freshly-pulled data is actually
-    reflected in that same day's ratings/predictions -- not a day behind."""
+    reflected in that same day's ratings/predictions -- not a day behind.
+
+    Also clears the in-process "current form" caches in
+    sports/nfl/nflfastr_features.py and sports/nfl/qb_features.py -- real
+    bug found and fixed 2026-09-15 (app owner: "the data looks stale to
+    me"): those caches populate once, on first use, and never invalidate
+    themselves, so a long-lived Railway process would silently keep
+    reusing whatever was in memory from the FIRST pipeline build after
+    boot for the rest of that deployment's uptime, no matter how many
+    days of fresh data this function pulled onto disk. See
+    nflfastr_features.reset_caches()'s own docstring for the full story.
+    CFB's equivalent (sports/cfb/cfbfastr_features.py) does NOT need this
+    -- checked directly: its own load_team_game_success() already
+    re-reads and re-caches unconditionally on every call, so it was never
+    actually affected by this bug."""
     refresh_cfb_success_data()
     refresh_nfl_epa_data()
+
+    from sports.nfl import nflfastr_features, qb_features
+    nflfastr_features.reset_caches()
+    qb_features.reset_cache()

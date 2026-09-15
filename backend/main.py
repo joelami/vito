@@ -898,6 +898,21 @@ def trigger_harness_run(x_admin_token: str = Header(default=None)):
 
 
 # ---------------------------------------------------------------------------
+# API: scheduler freshness — real gap this closes (app owner, 2026-09-15:
+# "the data looks stale to me... I'm seeing this issue across all
+# leagues"): whether the in-process scheduler is even running, and when it
+# last actually completed, was previously answerable ONLY by reading
+# Railway logs — no way to check from the running app itself. Read-only,
+# no ADMIN_TOKEN needed (same convention as /api/admin/watchlist-status
+# above — nothing destructive here).
+# ---------------------------------------------------------------------------
+@app.get("/api/admin/scheduler-status")
+def get_scheduler_status():
+    from scheduler import scheduler_status, FULL_RUN_AT, SYNC_ONLY_AT
+    return {**scheduler_status, "full_run_at_utc": FULL_RUN_AT, "sync_only_at_utc": SYNC_ONLY_AT}
+
+
+# ---------------------------------------------------------------------------
 # API: manual watchlist re-check trigger — same shape and same reasoning as
 # /api/admin/run-harness above (background thread, ADMIN_TOKEN-gated, fails
 # closed). Real gap this closes: core/watchlist.py's stale_items() already

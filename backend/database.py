@@ -121,6 +121,15 @@ CREATE TABLE IF NOT EXISTS forward_picks (
     profit_units REAL,
     clv_pct REAL,
     settled_at TEXT,
+    -- Added 2026-09-15 (app owner: "I'm also curious if the model can
+    -- start giving out its predicted score... this could be a better
+    -- indicator to allow the user to understand confidence differently").
+    -- Nullable, backfilled by _add_predicted_score_columns() below on
+    -- existing rows -- see that migration's own docstring.
+    predicted_margin REAL,
+    predicted_total REAL,
+    predicted_home_score REAL,
+    predicted_away_score REAL,
     UNIQUE(sport, espn_event_id, market, side, line)
 );
 
@@ -194,6 +203,27 @@ def _fix_forward_picks_null_line_dupes(conn):
     """)
 
 
+def _add_predicted_score_columns(conn):
+    """
+    Migration, safe to run on every startup (same convention as
+    _fix_forward_picks_null_line_dupes above) -- CREATE TABLE IF NOT
+    EXISTS only shapes a BRAND NEW database; an existing production
+    forward_picks table (real, irreplaceable forward-test history --
+    see core/db_backup.py's own docstring for the real Volume-loss
+    incident that makes this data worth protecting) needs an explicit
+    ALTER TABLE to gain these columns, guarded by checking whether they
+    already exist first (SQLite has no native "ADD COLUMN IF NOT
+    EXISTS"). Existing rows get NULL for all four -- an honest "we don't
+    know, this pick predates the feature" rather than a fabricated
+    backfilled number; every NEW pick logged after this migration runs
+    gets the real value (see harness.py's snapshot_new_picks()).
+    """
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(forward_picks)").fetchall()}
+    for col in ("predicted_margin", "predicted_total", "predicted_home_score", "predicted_away_score"):
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE forward_picks ADD COLUMN {col} REAL")
+
+
 def init_db():
     # Real failure this fixes: `DB_PATH=/data/sports_bet.db` pointing at a
     # Railway Volume mount that hasn't been created yet (or any other
@@ -204,6 +234,7 @@ def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    _add_predicted_score_columns(conn)
     _fix_forward_picks_null_line_dupes(conn)
     conn.commit()
     conn.close()

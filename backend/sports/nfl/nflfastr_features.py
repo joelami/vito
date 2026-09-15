@@ -307,3 +307,28 @@ def get_current_trailing_epa_sos_adjusted(franchise: str, n_games: int = 10) -> 
         return {f"{col}_trail_sos": league_avg_adj[col] for col in TRAILING_COLS}
     recent = team_rows.tail(n_games)
     return {f"{col}_trail_sos": float(recent[f"{col}_adj"].mean()) for col in TRAILING_COLS}
+
+
+def reset_caches() -> None:
+    """
+    Real bug found and fixed 2026-09-15 (app owner: "the data looks stale
+    to me... I'm seeing this issue across all leagues"): _team_game_epa_cache
+    and _adjusted_per_game_cache both populate ONCE, on first use, and
+    never invalidate themselves -- load_team_game_epa() itself always
+    re-reads the CSV fresh (so TRAINING via build_trailing_epa_features()
+    was never actually affected), but get_current_trailing_epa() and BOTH
+    build_trailing_epa_features_sos_adjusted() (training) and
+    get_current_trailing_epa_sos_adjusted() (live) all read through these
+    frozen caches. In a long-lived Railway process (no restart between
+    scheduler runs), this meant: core/dataset_refresh.py correctly pulls
+    fresh nflverse data onto disk every day, but the SOS-adjusted trailing
+    feature -- and live scoring's raw EPA lookup -- would keep silently
+    reusing whatever was in memory from the FIRST pipeline build after
+    boot, for the rest of that deployment's uptime, no matter how many
+    days of real new games the CSV on disk gained. Call this once per
+    scheduled full run, before rebuilding pipelines, so every day's build
+    starts from a clean slate -- see scheduler.py's _run_full().
+    """
+    global _team_game_epa_cache, _adjusted_per_game_cache
+    _team_game_epa_cache = None
+    _adjusted_per_game_cache = None

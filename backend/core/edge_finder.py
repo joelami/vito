@@ -36,6 +36,24 @@ class BetOpportunity:
     edge_pct: float
     ev_per_unit: float
     kelly_stake: float    # fraction of bankroll, fractional Kelly
+    # Added 2026-09-15 (app owner: "I'm also curious if the model can
+    # start giving out its predicted score... this could be a better
+    # indicator to allow the user to understand confidence differently").
+    # predicted_margin/predicted_total were already computed for every
+    # opportunity internally (they drive model_prob itself, via
+    # core/ensemble.py) but never attached to the object a caller actually
+    # sees -- filled in by evaluate_game() below, once per GAME (same
+    # value across every market/side from that game, not opportunity-
+    # specific), never by _opportunity() itself. predicted_home_score/
+    # predicted_away_score are the derived, more directly readable form
+    # (home = (total+margin)/2, away = (total-margin)/2) -- e.g. "Vito:
+    # Chiefs 27.4, Broncos 20.2" reads more plainly than "-7.2 margin" to
+    # someone who isn't already fluent in spread notation, without
+    # dropping the raw numbers a more technical reader would want.
+    predicted_margin: float = None
+    predicted_total: float = None
+    predicted_home_score: float = None
+    predicted_away_score: float = None
 
     def to_dict(self):
         return asdict(self)
@@ -328,5 +346,17 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
                                       fair_over, over_odds, conf_over, kelly_frac))
             opps.append(_opportunity("total", "under", total_line, 1.0 - tot["blended_prob"],
                                       fair_under, under_odds, conf_under, kelly_frac))
+
+    # Same predicted score for every opportunity from this one game (it's
+    # a GAME-level model output, not specific to any one market/side) --
+    # see BetOpportunity's own docstring for why this is filled in here
+    # rather than per-market above.
+    pred_margin, pred_total = get("predicted_margin"), get("predicted_total")
+    for o in opps:
+        o.predicted_margin = pred_margin
+        o.predicted_total = pred_total
+        if pred_margin is not None and pred_total is not None:
+            o.predicted_home_score = round((pred_total + pred_margin) / 2, 1)
+            o.predicted_away_score = round((pred_total - pred_margin) / 2, 1)
 
     return opps

@@ -32,6 +32,26 @@ SYNC_ONLY_AT = os.environ.get("SCHEDULER_SYNC_ONLY_UTC", "21:00")
 
 _CHECK_INTERVAL_S = 60
 
+# Real gap this closes (app owner, 2026-09-15: "the data looks stale to
+# me... I'm seeing this issue across all leagues"): before this, whether
+# ratings had actually refreshed was answerable ONLY by reading Railway
+# logs (which nobody watches proactively, see this project's own
+# no-alerting gap elsewhere) -- there was no way to check freshness from
+# the running app itself. This module-level state is a real heartbeat,
+# updated at the end of every _run_full()/_run_sync_only() pass
+# (including boot), and exposed via main.py's /api/admin/scheduler-status
+# and /api/ratings' own last_updated_utc field, so "is this stale" is a
+# checkable fact, not a guess -- for a user AND for a future debugging
+# session of this exact complaint.
+scheduler_status = {
+    "enabled": None,  # set by start_background_scheduler() -- True/False, not None, once main.py has actually called it
+    "last_full_run_utc": None,
+    "last_full_run_ok_sports": [],
+    "last_full_run_failed_sports": [],
+    "last_sync_run_utc": None,
+    "loop_started_utc": None,
+}
+
 
 def _run_parlays(snapshot_new: bool):
     """
@@ -107,6 +127,7 @@ def _run_full(pipelines: dict = None):
         except Exception as e:
             print(f"[scheduler] dataset refresh FAILED: {e}")
 
+    ok_sports, failed_sports = [], []
     for sport in LIVE_SPORTS:
         try:
             fresh_pipeline = harness.run(sport, pipeline=(pipelines or {}).get(sport))
@@ -128,8 +149,16 @@ def _run_full(pipelines: dict = None):
                     # ~0.16s for the whole thing, so a full recompute here
                     # every cycle is fine, no incremental cache needed).
                     main._data["history_opportunities"] = main.compute_history_opportunities(fresh_pipeline)
+                ok_sports.append(sport)
+            else:
+                failed_sports.append(sport)  # harness.run() returned None -- treat as not-refreshed, not a silent pass
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
+            failed_sports.append(sport)
+
+    scheduler_status["last_full_run_utc"] = datetime.now(timezone.utc).isoformat()
+    scheduler_status["last_full_run_ok_sports"] = ok_sports
+    scheduler_status["last_full_run_failed_sports"] = failed_sports
 
     # Real incident this closes (2026-09-06, caught by the app owner from the
     # live production UI): harness.reconcile_stale_confidence() originally
@@ -233,10 +262,13 @@ def _run_sync_only():
     except Exception as e:
         print(f"[scheduler] database backup FAILED: {e}")
 
+    scheduler_status["last_sync_run_utc"] = datetime.now(timezone.utc).isoformat()
+
 
 def _loop(boot_pipelines: dict = None):
     print(f"[scheduler] in-process scheduler started -- full run at {FULL_RUN_AT} UTC, "
           f"sync-only at {SYNC_ONLY_AT} UTC")
+    scheduler_status["loop_started_utc"] = datetime.now(timezone.utc).isoformat()
 
     # Run once immediately on boot -- otherwise a fresh database (a new
     # Volume, or the very first deploy) sits empty until the next scheduled
@@ -290,6 +322,8 @@ def start_background_scheduler(boot_pipelines: dict = None):
     if os.environ.get("ENABLE_SCHEDULER") != "1":
         print("[scheduler] ENABLE_SCHEDULER not set to 1 -- in-process harness scheduling disabled "
               "(expected for local dev, which uses launchd instead; see docs/DEPLOYMENT.md).")
+        scheduler_status["enabled"] = False
         return
+    scheduler_status["enabled"] = True
     thread = threading.Thread(target=_loop, args=(boot_pipelines,), daemon=True, name="harness-scheduler")
     thread.start()
