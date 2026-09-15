@@ -156,3 +156,154 @@ def build_trailing_epa_features(games: pd.DataFrame, n_games: int = 10) -> pd.Da
         for col, out_col in zip(TRAILING_COLS, trailing_cols_out):
             out[f"{side}_{col}_trail"] = merged[out_col].fillna(league_avg[col]).values
     return out
+
+
+# Offense col -> the opponent's own trailing col it gets adjusted against
+# (an offense's EPA gets normalized by how good the DEFENSE it actually
+# faced each game typically is; a defense's allowed-EPA gets normalized
+# by how good the OFFENSE it faced typically is). Symmetric pairing, not
+# arbitrary -- every "off_*" pairs with the matching "def_*_allowed" and
+# vice versa.
+_SOS_OPPONENT_COL = {
+    "off_epa_per_play": "def_epa_per_play_allowed",
+    "off_success_rate": "def_success_rate_allowed",
+    "def_epa_per_play_allowed": "off_epa_per_play",
+    "def_success_rate_allowed": "off_success_rate",
+}
+
+
+_adjusted_per_game_cache = None
+
+
+def _build_adjusted_per_game_table(n_games: int) -> pd.DataFrame:
+    """
+    Shared core of the opponent adjustment, used by both
+    build_trailing_epa_features_sos_adjusted() (training, below) and
+    get_current_trailing_epa_sos_adjusted() (live scoring) -- computed
+    once and cached so live scoring doesn't redo this self-join per call.
+    Returns one row per (game_id, franchise) with `{col}_adj` columns:
+    this team's raw per-game stat, opponent-adjusted (see
+    build_trailing_epa_features_sos_adjusted()'s docstring for the
+    method), NOT yet rolled into a trailing window -- that's the caller's
+    job, since training rolls per-target-game and live scoring rolls
+    relative to "now."
+    """
+    epa = load_team_game_epa()
+    league_avg = {col: float(epa[col].mean()) for col in TRAILING_COLS}
+
+    trailing = epa[["game_id", "franchise", "gameday"] + TRAILING_COLS].sort_values(
+        ["franchise", "gameday"], kind="stable")
+    trailing_cols_out = [f"{col}_trail" for col in TRAILING_COLS]
+    for col, out_col in zip(TRAILING_COLS, trailing_cols_out):
+        trailing[out_col] = trailing.groupby("franchise")[col].transform(
+            lambda s: s.shift(1).rolling(n_games, min_periods=1).mean()
+        )
+
+    # Self-join on game_id to attach each row's OPPONENT's own trailing
+    # columns (entering that same game) -- exactly 2 franchises per
+    # game_id, so filtering out the self-match leaves exactly one
+    # opponent row per original row.
+    opp_cols = [f"{c}_trail" for c in TRAILING_COLS]
+    self_joined = trailing.merge(
+        trailing[["game_id", "franchise"] + opp_cols], on="game_id", suffixes=("", "_opp"))
+    self_joined = self_joined[self_joined["franchise"] != self_joined["franchise_opp"]].copy()
+
+    # Per-game opponent-adjusted raw value: this team's raw stat in this
+    # one game, minus the opponent's typical (trailing, pre-game) rate on
+    # the matching column, plus the league average to re-center.
+    for col in TRAILING_COLS:
+        opp_trail_col = f"{_SOS_OPPONENT_COL[col]}_trail_opp"
+        opp_trail = self_joined[opp_trail_col].fillna(league_avg[_SOS_OPPONENT_COL[col]])
+        self_joined[f"{col}_adj"] = self_joined[col] - opp_trail + league_avg[_SOS_OPPONENT_COL[col]]
+
+    return self_joined.sort_values(["franchise", "gameday"], kind="stable")
+
+
+def build_trailing_epa_features_sos_adjusted(games: pd.DataFrame, n_games: int = 10) -> pd.DataFrame:
+    """
+    Opponent-adjusted counterpart to build_trailing_epa_features() above --
+    real gap that one has: it's schedule-BLIND, unlike Elo (which already
+    opponent-adjusts by construction). A team's raw off_epa_per_play
+    against three bad defenses in a row looks identical to the same three
+    games against three good ones, even though the second is a much
+    stronger real signal of offensive quality.
+
+    Method (a standard "opponent-adjust by subtracting the opponent's own
+    typical allowed rate, then re-center to the league average" approach,
+    the same idea SRS-style ratings use, not invented for this project):
+    for each of a team's past games, this looks up what the OPPONENT's
+    own trailing (pre-that-game, walk-forward-safe on the opponent's side
+    too) allowed-rate was, subtracts it from this team's raw performance
+    in that one game, and adds back the league average so the adjustment
+    is relative to a LEAGUE-AVERAGE opponent, not zero. THEN rolls those
+    per-game adjusted values over this team's own trailing window --
+    adjustment happens per-game, before rolling, because a team's last 10
+    games each had a DIFFERENT opponent with a different strength at the
+    time of THAT specific matchup, not one fixed opponent. (See
+    _build_adjusted_per_game_table() above for the shared per-game-
+    adjustment step this and the live-scoring counterpart both use.)
+
+    A past game where the opponent itself had no trailing history yet
+    (early in the opponent's own timeline) falls back to treating that
+    one game as against a league-average opponent (adjustment ~0) rather
+    than propagating NaN forward -- same cold-start convention as every
+    other trailing feature here.
+
+    Produces the same 8 home_/away_ prefixed columns as
+    build_trailing_epa_features(), suffixed `_trail_sos` instead of
+    `_trail` so both can coexist on the same feature row. ADOPTED via
+    hypothesis test "nfl_nflverse_trailing_epa_sos_adjustment" (see
+    decision_log.jsonl and research_nflfastr_epa_sos_adjustment.py):
+    total_corr +0.0084 full-sample, confirmed STABLE across a season
+    split-half (both halves improved independently, unlike the QB-
+    continuity feature tested the same session, which looked good in
+    aggregate but failed that exact check).
+    """
+    global _adjusted_per_game_cache
+    epa = load_team_game_epa()
+    league_avg = {col: float(epa[col].mean()) for col in TRAILING_COLS}
+
+    if _adjusted_per_game_cache is None:
+        _adjusted_per_game_cache = _build_adjusted_per_game_table(n_games)
+    self_joined = _adjusted_per_game_cache
+
+    sos_cols_out = [f"{col}_trail_sos" for col in TRAILING_COLS]
+    for col, out_col in zip(TRAILING_COLS, sos_cols_out):
+        self_joined[out_col] = self_joined.groupby("franchise")[f"{col}_adj"].transform(
+            lambda s: s.shift(1).rolling(n_games, min_periods=1).mean()
+        )
+
+    out = games.copy()
+    for side, franchise_col in (("home", "home_franchise"), ("away", "away_franchise")):
+        merged = out[[franchise_col, "date"]].merge(
+            self_joined[["franchise", "gameday"] + sos_cols_out],
+            left_on=[franchise_col, "date"], right_on=["franchise", "gameday"], how="left",
+        )
+        for col, out_col in zip(TRAILING_COLS, sos_cols_out):
+            out[f"{side}_{out_col}"] = merged[out_col].fillna(league_avg[col]).values
+    return out
+
+
+def get_current_trailing_epa_sos_adjusted(franchise: str, n_games: int = 10) -> dict:
+    """
+    Live-scoring counterpart to build_trailing_epa_features_sos_adjusted(),
+    same real gap/convention as get_current_trailing_epa() -- see that
+    function's docstring. Uses the same cached, already-opponent-adjusted
+    per-game table (_build_adjusted_per_game_table()) that training uses,
+    just takes this one franchise's most recent `n_games` ADJUSTED values
+    directly (no re-rolling needed -- "current form" IS the mean of the
+    last N real, already-adjusted games, the same relationship
+    get_current_trailing_epa() has to build_trailing_epa_features()).
+    """
+    global _adjusted_per_game_cache
+    if _adjusted_per_game_cache is None:
+        _adjusted_per_game_cache = _build_adjusted_per_game_table(n_games)
+    self_joined = _adjusted_per_game_cache
+    epa = load_team_game_epa()
+    league_avg_adj = {col: float(epa[col].mean()) for col in TRAILING_COLS}  # re-centered adjustment -> same mean as raw
+
+    team_rows = self_joined[self_joined["franchise"] == franchise].sort_values("gameday", kind="stable")
+    if team_rows.empty:
+        return {f"{col}_trail_sos": league_avg_adj[col] for col in TRAILING_COLS}
+    recent = team_rows.tail(n_games)
+    return {f"{col}_trail_sos": float(recent[f"{col}_adj"].mean()) for col in TRAILING_COLS}

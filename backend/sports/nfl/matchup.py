@@ -10,7 +10,7 @@ import pandas as pd
 from . import config as nfl_config
 from .features import naive_score_features, pythagorean_win_pct
 from .weather import current_stadium_row
-from .nflfastr_features import get_current_trailing_epa
+from .nflfastr_features import get_current_trailing_epa, get_current_trailing_epa_sos_adjusted
 
 
 def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, game_date,
@@ -52,6 +52,8 @@ def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, ga
     weather = current_stadium_row(home_fr, season, game_date)
     home_epa = get_current_trailing_epa(home_fr)
     away_epa = get_current_trailing_epa(away_fr)
+    home_epa_sos = get_current_trailing_epa_sos_adjusted(home_fr)
+    away_epa_sos = get_current_trailing_epa_sos_adjusted(away_fr)
     return pd.DataFrame([{
         "rating_diff_pre": home_rating - away_rating,
         "rest_diff": home_rest - away_rest,
@@ -79,6 +81,14 @@ def build_matchup_feature_row(pipeline: dict, home_team: str, away_team: str, ga
         "away_off_success_rate_trail": away_epa["off_success_rate"],
         "away_def_epa_per_play_allowed_trail": away_epa["def_epa_per_play_allowed"],
         "away_def_success_rate_allowed_trail": away_epa["def_success_rate_allowed"],
+        "home_off_epa_per_play_trail_sos": home_epa_sos["off_epa_per_play_trail_sos"],
+        "home_off_success_rate_trail_sos": home_epa_sos["off_success_rate_trail_sos"],
+        "home_def_epa_per_play_allowed_trail_sos": home_epa_sos["def_epa_per_play_allowed_trail_sos"],
+        "home_def_success_rate_allowed_trail_sos": home_epa_sos["def_success_rate_allowed_trail_sos"],
+        "away_off_epa_per_play_trail_sos": away_epa_sos["off_epa_per_play_trail_sos"],
+        "away_off_success_rate_trail_sos": away_epa_sos["off_success_rate_trail_sos"],
+        "away_def_epa_per_play_allowed_trail_sos": away_epa_sos["def_epa_per_play_allowed_trail_sos"],
+        "away_def_success_rate_allowed_trail_sos": away_epa_sos["def_success_rate_allowed_trail_sos"],
     }]), home_rating, away_rating, naive_total
 
 

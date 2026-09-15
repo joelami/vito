@@ -26,7 +26,7 @@ from sports.nfl import config as nfl_config
 from sports.nfl.loader import load_games
 from sports.nfl.features import build_features, current_form_snapshot, ML_FEATURE_COLS
 from sports.nfl.weather import attach_weather
-from sports.nfl.nflfastr_features import build_trailing_epa_features
+from sports.nfl.nflfastr_features import build_trailing_epa_features, build_trailing_epa_features_sos_adjusted
 
 
 def records(df: pd.DataFrame) -> list:
@@ -102,6 +102,13 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     # noise floor; ROI flat, not suspicious). ML_FEATURE_COLS below
     # already includes the 8 new columns this adds.
     feats = build_trailing_epa_features(feats)
+    # Adopted 2026-09-15 via hypothesis test "nfl_nflverse_trailing_epa_
+    # sos_adjustment" (see decision_log.jsonl and that module's
+    # build_trailing_epa_features_sos_adjusted() docstring) -- opponent-
+    # adjusted counterpart to the raw trailing EPA above, real and
+    # split-half-stable improvement. ML_FEATURE_COLS below already
+    # includes the 8 new "_trail_sos" columns this adds.
+    feats = build_trailing_epa_features_sos_adjusted(feats)
     wf = walk_forward_predict(feats, ML_FEATURE_COLS)
 
     # full history (left join) for browsing; OOS-only (inner join) for backtest/residual stats

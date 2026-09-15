@@ -214,4 +214,20 @@ ML_FEATURE_COLS = [
     "home_def_epa_per_play_allowed_trail", "home_def_success_rate_allowed_trail",
     "away_off_epa_per_play_trail", "away_off_success_rate_trail",
     "away_def_epa_per_play_allowed_trail", "away_def_success_rate_allowed_trail",
+    # Adopted 2026-09-15 via hypothesis test "nfl_nflverse_trailing_epa_
+    # sos_adjustment" (see decision_log.jsonl and sports/nfl/
+    # nflfastr_features.py's build_trailing_epa_features_sos_adjusted()
+    # docstring for the full method) -- the raw trailing EPA above is
+    # schedule-BLIND (unlike Elo, which already opponent-adjusts); these
+    # 8 columns are the same trailing EPA/success-rate metrics but with
+    # each past game's contribution adjusted for how strong that game's
+    # specific opponent actually was. total_corr +0.0084, confirmed
+    # STABLE across a season split-half (both halves improved
+    # independently) -- unlike the QB-continuity feature tested the same
+    # session, which looked good in the full-sample aggregate but failed
+    # that exact stability check and was correctly rejected.
+    "home_off_epa_per_play_trail_sos", "home_off_success_rate_trail_sos",
+    "home_def_epa_per_play_allowed_trail_sos", "home_def_success_rate_allowed_trail_sos",
+    "away_off_epa_per_play_trail_sos", "away_off_success_rate_trail_sos",
+    "away_def_epa_per_play_allowed_trail_sos", "away_def_success_rate_allowed_trail_sos",
 ]
