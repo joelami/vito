@@ -254,6 +254,222 @@ def get_current_trailing_success(franchise: str, n_games: int = 10) -> dict:
     return {col: float(recent[col].mean()) for col in TRAILING_COLS}
 
 
+
+# ---------------------------------------------------------------------------
+# Opponent-adjusted (SOS) trailing success rate -- direct CFB transfer of
+# sports/nfl/nflfastr_features.py's build_trailing_epa_features_sos_adjusted()
+# / get_current_trailing_epa_sos_adjusted() (adopted 2026-09-15, see
+# decision_log.jsonl's "nfl_nflverse_trailing_epa_sos_adjustment" entry),
+# flagged as the cleanest cross-sport transfer candidate in
+# docs/model_improvement_candidates_2026-09-15.md's "Cross-sport structural
+# ideas" section: the raw off_success_rate_trail/def_success_rate_allowed_trail
+# columns above are schedule-BLIND -- three good offensive games against
+# weak defenses look identical to three good games against elite ones -- and
+# CFB's real cross-conference strength disparity (SEC vs. Sun Belt, say) is
+# exactly the case this method exists for.
+#
+# Method (identical to NFL's, see that module's docstring for the full
+# reasoning): for each of a team's past games, look up what the OPPONENT's
+# own trailing (pre-that-game, walk-forward-safe on the opponent's side too)
+# allowed/produced-rate was, subtract it from this team's raw performance in
+# that one game, add back the league average so the adjustment is relative
+# to a league-average opponent (not zero), THEN roll those per-game adjusted
+# values over this team's own trailing window.
+#
+# The one real difference from NFL, both inherited honestly from this
+# module's own team-name-mapping limitation (see module docstring): the
+# opponent lookup can only find a trailing rate for an opponent this module
+# successfully mapped to a Vito franchise (~72% of games). An opponent it
+# could not map contributes NO adjustment for that one past game -- treated
+# the same as "opponent has no trailing history yet" (falls back to the
+# league average, i.e. a no-op adjustment for that specific game) rather
+# than dropping the team's own game from its trailing window entirely. This
+# is a LEFT join on game_id (paired games use an inner self-join exactly
+# like NFL's, since exactly one real opponent row exists; unpaired games --
+# opponent unmapped, or one of the handful of raw cfbfastR game_ids with
+# only one team's row at all -- keep their own row with NaN opponent
+# columns, filled with league_avg below), not the plain inner self-join
+# NFL's version uses, specifically to implement that fallback instead of
+# silently losing coverage of the team's OWN games.
+# ---------------------------------------------------------------------------
+_SOS_OPPONENT_COL = {
+    "off_success_rate": "def_success_rate_allowed",
+    "def_success_rate_allowed": "off_success_rate",
+}
+
+# Populated by build_trailing_success_features_sos_adjusted(), read by
+# get_current_trailing_success_sos_adjusted() -- deliberately NOT gated by
+# "if _adjusted_per_game_cache is None" the way NFL's equivalent is. NFL's
+# populate-once pattern was a real bug (see nflfastr_features.reset_caches()'s
+# docstring: it silently froze after the first pipeline build in a
+# long-lived process). CFB's OWN existing convention (load_team_game_success()
+# always re-reads/re-caches unconditionally, see dataset_refresh.py's
+# refresh_all() docstring: "CFB's equivalent does NOT need this") is to
+# always recompute on every real build call instead -- matched here so this
+# new cache doesn't reintroduce the exact staleness class NFL just fixed.
+_adjusted_per_game_cache = None
+
+
+def _build_adjusted_per_game_table(vito_franchise_names, n_games: int) -> pd.DataFrame:
+    """
+    Shared core of the opponent adjustment -- mirrors sports/nfl/
+    nflfastr_features.py's _build_adjusted_per_game_table() exactly in
+    shape (see that function's docstring), adapted for CFB's two real
+    differences: (1) self-join key is `game_id` alone, no `gameday` (no
+    date column in the raw cfbfastR release -- same reason
+    build_trailing_success_features() above uses a (season, game_num)
+    ordinal join instead of NFL's date join); (2) the self-join is a LEFT
+    join with an explicit paired/solo split (see module comment above),
+    not NFL's plain inner join, to implement the "unmapped opponent falls
+    back to league average" behavior instead of dropping the team's own
+    game.
+
+    Returns one row per (game_id, franchise) actually present in this
+    module's franchise-mapped `success` data, with `{col}_adj` columns:
+    this team's raw per-game stat, opponent-adjusted, NOT yet rolled into
+    a trailing window (the caller's job, same division of labor as NFL's).
+    """
+    success = load_team_game_success(vito_franchise_names)
+    league_avg = {col: float(success[col].mean()) for col in TRAILING_COLS}
+
+    trailing = success[["game_id", "season", "franchise"] + TRAILING_COLS].sort_values(
+        ["franchise", "season", "game_id"], kind="stable")
+    trailing_cols_out = [f"{col}_trail" for col in TRAILING_COLS]
+    for col, out_col in zip(TRAILING_COLS, trailing_cols_out):
+        trailing[out_col] = trailing.groupby("franchise")[col].transform(
+            lambda s: s.shift(1).rolling(n_games, min_periods=1).mean()
+        )
+
+    # Paired games (both sides mapped -- the normal case, exactly 2 rows
+    # for this game_id in `trailing`): plain inner self-join, same as
+    # NFL's, guaranteed exactly one opponent match. Solo games (opponent
+    # unmapped, or one of the handful of raw game_ids with only one row
+    # at all -- see load_team_game_success()'s own docstring) keep their
+    # one row with opponent columns explicitly NaN, so the adjustment
+    # step below falls back to league_avg for them instead of the row
+    # disappearing from this team's own trailing-window pool entirely.
+    opp_cols = [f"{c}_trail" for c in TRAILING_COLS]
+    game_counts = trailing.groupby("game_id")["franchise"].transform("size")
+    paired = trailing[game_counts == 2]
+    solo = trailing[game_counts != 2].copy()
+
+    self_joined_paired = paired.merge(
+        paired[["game_id", "franchise"] + opp_cols], on="game_id", suffixes=("", "_opp"))
+    self_joined_paired = self_joined_paired[
+        self_joined_paired["franchise"] != self_joined_paired["franchise_opp"]
+    ].copy()
+
+    solo["franchise_opp"] = None
+    for c in opp_cols:
+        solo[f"{c}_opp"] = float("nan")
+
+    self_joined = pd.concat([self_joined_paired, solo], ignore_index=True, sort=False)
+
+    # Per-game opponent-adjusted raw value: this team's raw stat in this
+    # one game, minus the opponent's typical (trailing, pre-game) rate on
+    # the matching column (league-average fallback for both "opponent had
+    # no trailing history yet" AND "opponent unmapped/unpaired" -- both
+    # collapse to the same NaN-fill here), plus the league average to
+    # re-center.
+    for col in TRAILING_COLS:
+        opp_col = _SOS_OPPONENT_COL[col]
+        opp_trail_col = f"{opp_col}_trail_opp"
+        opp_trail = self_joined[opp_trail_col].fillna(league_avg[opp_col])
+        self_joined[f"{col}_adj"] = self_joined[col] - opp_trail + league_avg[opp_col]
+
+    return self_joined.sort_values(["franchise", "season", "game_id"], kind="stable")
+
+
+def build_trailing_success_features_sos_adjusted(games: pd.DataFrame, n_games: int = 10) -> pd.DataFrame:
+    """
+    Opponent-adjusted counterpart to build_trailing_success_features()
+    above -- see the module comment block right above this function for
+    the full method and CFB-specific coverage caveat. Produces the same 4
+    home_/away_ prefixed columns as build_trailing_success_features(),
+    suffixed `_trail_sos` instead of `_trail` so both can coexist on the
+    same feature row (this is meant to be added ON TOP of the raw trailing
+    columns, not replace them -- see research_success_rate_sos_adjustment.py).
+
+    Uses the exact same (franchise, season, game_num) ordinal join
+    build_trailing_success_features() uses to attach onto `games` (no real
+    date column in the raw cfbfastR release -- see that function's
+    docstring) -- computed independently here on the adjusted-per-game
+    table so the ordinal sequence matches exactly (same sort key, same set
+    of (franchise, season, game_id) rows, since `_build_adjusted_per_game_table()`
+    is derived from the identical `success` frame).
+    """
+    global _adjusted_per_game_cache
+    franchise_names = set(games["home_franchise"].unique()) | set(games["away_franchise"].unique())
+    success = load_team_game_success(franchise_names)  # ensures _success_by_franchise_cache is populated for live lookup
+    league_avg = {col: float(success[col].mean()) for col in TRAILING_COLS}
+
+    # Always recompute (not "if None") -- see _adjusted_per_game_cache's
+    # own module-level comment for why this deliberately does NOT mirror
+    # NFL's populate-once/reset_caches() pattern.
+    _adjusted_per_game_cache = _build_adjusted_per_game_table(franchise_names, n_games)
+    self_joined = _adjusted_per_game_cache.copy()
+
+    sos_cols_out = [f"{col}_trail_sos" for col in TRAILING_COLS]
+    for col, out_col in zip(TRAILING_COLS, sos_cols_out):
+        self_joined[out_col] = self_joined.groupby("franchise")[f"{col}_adj"].transform(
+            lambda s: s.shift(1).rolling(n_games, min_periods=1).mean()
+        )
+
+    self_joined = self_joined.sort_values(["franchise", "season", "game_id"], kind="stable")
+    self_joined["game_num"] = self_joined.groupby(["franchise", "season"]).cumcount()
+
+    long_games = pd.concat([
+        games[["game_id", "season", "date", "home_franchise"]].rename(columns={"home_franchise": "franchise"}).assign(side="home"),
+        games[["game_id", "season", "date", "away_franchise"]].rename(columns={"away_franchise": "franchise"}).assign(side="away"),
+    ]).sort_values(["franchise", "season", "date"], kind="stable")
+    long_games["game_num"] = long_games.groupby(["franchise", "season"]).cumcount()
+
+    merged = long_games.merge(self_joined[["franchise", "season", "game_num"] + sos_cols_out],
+                               on=["franchise", "season", "game_num"], how="left")
+
+    out = games.copy()
+    for side, franchise_col in (("home", "home_franchise"), ("away", "away_franchise")):
+        side_rows = merged[merged["side"] == side][["game_id", "franchise"] + sos_cols_out]
+        j = out[["game_id", franchise_col]].merge(
+            side_rows, left_on=["game_id", franchise_col], right_on=["game_id", "franchise"], how="left")
+        for col, out_col in zip(TRAILING_COLS, sos_cols_out):
+            out[f"{side}_{out_col}"] = j[out_col].fillna(league_avg[col]).values
+    return out
+
+
+def get_current_trailing_success_sos_adjusted(franchise: str, n_games: int = 10) -> dict:
+    """
+    Live-scoring counterpart to build_trailing_success_features_sos_adjusted(),
+    mirrors sports/nfl/nflfastr_features.py's
+    get_current_trailing_epa_sos_adjusted() exactly -- "current form" IS
+    the mean of the last N real, already-adjusted games, no re-rolling
+    needed.
+
+    Requires build_trailing_success_features_sos_adjusted() (called during
+    CFB pipeline construction) to have already run at least once in this
+    process, same requirement get_current_trailing_success() has for the
+    name-mapping cache -- raises a clear error rather than silently
+    returning an empty/wrong result if called first, same reasoning as
+    that function's own docstring.
+    """
+    if _adjusted_per_game_cache is None:
+        raise RuntimeError(
+            "get_current_trailing_success_sos_adjusted() called before any "
+            "build_trailing_success_features_sos_adjusted() call in this process -- "
+            "build the CFB pipeline (which calls it) first, so the opponent-adjusted "
+            "per-game table exists."
+        )
+    self_joined = _adjusted_per_game_cache
+    league_avg_adj = {col: float(_success_by_franchise_cache[col].mean()) for col in TRAILING_COLS}
+
+    team_rows = self_joined[self_joined["franchise"] == franchise].sort_values(
+        ["season", "game_id"], kind="stable")
+    if team_rows.empty:
+        return {f"{col}_trail_sos": league_avg_adj[col] for col in TRAILING_COLS}
+    recent = team_rows.tail(n_games)
+    return {f"{col}_trail_sos": float(recent[f"{col}_adj"].mean()) for col in TRAILING_COLS}
+
+
 def build_trailing_success_features(games: pd.DataFrame, n_games: int = 10) -> pd.DataFrame:
     """
     Same contract as sports/nfl/nflfastr_features.py's
