@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-pandas>=2.2  # real regression 2026-09-14: an unpinned version let a transitive dependency silently downgrade it locally
-numpy
+pandas>=2.2,<3.0  # real regression 2026-09-15: an unbounded upper pin let Railway's build silently pick up pandas 3.0.5 (a brand-new major version, real breaking changes -- copy-on-write mandatory, string dtype default, removed deprecated APIs) the moment it was published, while every line of this codebase has only ever been tested against 2.x -- confirmed directly: local dev runs 2.3.3, Railway's own build log showed it resolving 3.0.5. Same failure class as the 2026-09-14 comment above, opposite direction (upgraded past what's tested, not downgraded below it) -- an unbounded pin is exactly as dangerous either way.
+numpy<2.0  # same unbounded-pin risk as pandas above, same fix -- local dev runs 1.26.4, Railway's build resolved 2.5.3 (also a real breaking major version); pinned to the series this codebase has actually been run against
 scikit-learn
 openpyxl
 boto3

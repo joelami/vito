@@ -141,12 +141,29 @@ def startup():
     except Exception as e:
         print(f"[startup] live_log restore_gap FAILED (non-fatal): {e}")
 
-    nfl_pipeline = build_sport_pipeline("NFL", persist_backtest=True)
-    _data.update(nfl_pipeline)  # legacy flat access — every existing NFL-only route reads _data directly
-    _data["history_opportunities"] = compute_history_opportunities(nfl_pipeline)
-
-    print(f"[startup] NFL: {len(_data['games'])} games loaded, {len(_data['oos_df'])} walk-forward "
-          f"predictions, {len(_data['current_ratings'])} teams rated.")
+    # Real gap found and fixed 2026-09-15 (app owner: "our deployments keep
+    # failing"): unlike every OTHER sport below, NFL's pipeline build had NO
+    # try/except around it -- any real problem building NFL specifically
+    # (a missing/corrupt dataset file, an R2 sync gap, any exception at
+    # all) crashed this entire startup() function uncaught, which crashes
+    # the whole app before it can ever answer a healthcheck -- exactly the
+    # "service unavailable for the full retry window" failure pattern a
+    # real, live Railway deploy log showed. Every other sport already had
+    # this exact protection (see the comment below, "a sport that fails to
+    # build... is logged and skipped rather than taking the whole app
+    # down") -- NFL was just missed, presumably because it predates that
+    # convention being established for the sports added after it.
+    _data["pipelines"] = {}
+    try:
+        nfl_pipeline = build_sport_pipeline("NFL", persist_backtest=True)
+        _data.update(nfl_pipeline)  # legacy flat access — every existing NFL-only route reads _data directly
+        _data["pipelines"]["NFL"] = nfl_pipeline
+        _data["history_opportunities"] = compute_history_opportunities(nfl_pipeline)
+        print(f"[startup] NFL: {len(_data['games'])} games loaded, {len(_data['oos_df'])} walk-forward "
+              f"predictions, {len(_data['current_ratings'])} teams rated.")
+    except Exception as e:
+        print(f"[startup] NFL pipeline FAILED to build, skipping (app stays up, NFL routes will 404 "
+              f"until this is fixed and the app restarts): {e}")
 
     # Every other live sport (see core/dispatch.py's LIVE_SPORTS, including
     # CFB as of 2026-08-25 — see that list's own comment for the real,
@@ -157,7 +174,6 @@ def startup():
     # fails to build (e.g. missing dataset) is logged and skipped rather
     # than taking the whole app down — every other tab/sport should still
     # work.
-    _data["pipelines"] = {"NFL": nfl_pipeline}
     for sport in LIVE_SPORTS:
         if sport == "NFL":
             continue
