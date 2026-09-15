@@ -69,6 +69,52 @@ noise floor, ROI improved +0.14pp, margin_corr moved -0.0015, within
 noise either way) via a core.research hypothesis test - see
 research_starter_kbb_pct.py and decision_log.jsonl
 ("starter_kbb_pct_rolling").
+
+BALLPARK SCORING-ENVIRONMENT FACTOR ("park factor"): `park_scoring_factor`
+(a park's trailing total-runs average relative to the league's own
+trailing total-runs average, centered at 1.0 - see sports/mlb/park_
+factor.py's module docstring for the exact construction and the direct
+verification that `park_id` needs no separate relocation-mapping table,
+unlike TEAM_LEAGUE/TEAM_TIMEZONE above) must already be a column on
+`games` - call `park_factor.attach_park_factor(games)` before this, same
+ordering dependency as the starter-quality columns above. A SINGLE
+game-level column (not home_/away_-split), since a park's run environment
+applies identically to both offenses in a given game - same shape as
+`is_interleague`/`is_night`. Adopted (`adopt_cautiously` - a real,
+noise-floor-clearing statistical fit improvement: total_corr +0.0550
+full-sample, CONFIRMED STABLE across a season split-half (+0.0631 early,
++0.0477 late, both independently well above the noise floor); margin_corr
+moved -0.0003, within noise; ROI moved -0.26pp, within noise, not
+suspicious - landed on "adopt_cautiously" rather than plain "adopt" only
+because the small ROI dip technically routes evaluate_hypothesis() there,
+same as home_sp_er_lN's own adopt_cautiously result above, which was
+wired into production on the same reasoning) via a core.research
+hypothesis test - see research_park_factor.py and decision_log.jsonl
+("mlb_park_scoring_factor"). This is comfortably the single largest
+total_corr improvement of any MLB feature tested in this project to date
+- plausible, not suspicious, given park_scoring_factor's own raw
+(unconditional) correlation with actual_total is a real, stable 0.138
+(0.151 early era, 0.129 late era) and the baseline total_corr this model
+starts from is itself quite low (~0.10).
+
+TEAM DEFENSIVE EFFICIENCY (DER): tested via a core.research hypothesis
+test (sports/mlb/research_defensive_efficiency.py) as the direct
+complementary signal to starter_kbb_pct_rolling's own named gap ("can't
+separate a pitcher's skill from his defense") - REJECTED, NOT wired into
+ML_FEATURE_COLS. total_corr moved +0.0004 (well below the 0.005 noise
+floor - essentially flat), margin_corr moved -0.0001 (within noise); the
+REQUIRED season split-half check (see decision_log.jsonl,
+"mlb_defensive_efficiency_ratio") confirmed this is a genuine null, not
+diluted signal from thin event-file coverage in the early (1990-2007)
+era - the late era (2008-2025, where DER has real, non-fallback coverage)
+moved slightly NEGATIVE, not positive. A plausible, honest explanation:
+team defensive efficiency is likely already substantially reflected
+indirectly in pf_l10/pa_l10 and the two already-adopted starter features,
+so DER adds little genuinely new information even though it measures a
+conceptually distinct thing. Kept as real, tested infrastructure
+(sports/mlb/defensive_efficiency.py, same base-code-classification
+verification rigor as every other Retrosheet-derived feature here) since
+the parsing/classification work is sound - just not adopted.
 """
 
 import pandas as pd
@@ -329,6 +375,7 @@ ML_FEATURE_COLS = [
     "home_sp_er_lN", "away_sp_er_lN", "sp_er_diff_lN",
     "home_sp_kbb_pct_lN", "away_sp_kbb_pct_lN", "sp_kbb_pct_diff_lN",
     "market_fair_home_prob",
+    "park_scoring_factor",
 ]
 
 
@@ -365,6 +412,7 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, **_i
     """
     from .starting_pitcher import LEAGUE_AVG_SP_ER_PER_START
     from .starter_kbb_quality import LEAGUE_AVG_SP_KBB_PCT
+    from .park_factor import get_current_park_factor
     row = {
         "home_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
         "away_sp_er_lN": LEAGUE_AVG_SP_ER_PER_START,
@@ -415,6 +463,16 @@ def extra_matchup_features(home_fr, away_fr, game_date, home_row, away_row, **_i
         row["is_night"] = int(local_dt.hour >= NIGHT_GAME_LOCAL_HOUR)
     else:
         row["is_night"] = 0
+
+    # park_scoring_factor: unlike market_fair_home_prob below, this DOES
+    # have a real live source -- park_factor.get_current_park_factor(home_fr)
+    # reads the historical dataset's own most-recent-known home park for
+    # this franchise and that park's own trailing scoring factor as of
+    # right now (same "current form as of now" convention as
+    # current_form_snapshot -- see that function's docstring). Falls back
+    # to a neutral 1.0 only for a franchise with zero historical games at
+    # all, which should not happen for any real MLB team.
+    row["park_scoring_factor"] = get_current_park_factor(home_fr)
 
     # market_fair_home_prob: this hook has no access to the live market odds
     # core/matchup.py's score_matchup() already holds for this exact game

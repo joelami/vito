@@ -214,6 +214,7 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
     for extra_module_name, attach_fn_name in [
         ("starting_pitcher", "attach_starter_quality"),
         ("starter_kbb_quality", "attach_starter_kbb_pct"),
+        ("park_factor", "attach_park_factor"),
     ]:
         try:
             extra_module = importlib.import_module(f"sports.{sport}.{extra_module_name}")
