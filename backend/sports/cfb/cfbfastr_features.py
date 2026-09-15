@@ -14,18 +14,48 @@ the full walk-forward-safety reasoning, identical here.
 TEAM-NAME MAPPING IS THE REAL, HONEST LIMITATION HERE, different from
 NFL's clean 32-code mapping: cfbfastR uses bare school names ("Ohio
 State"), this project's own CFB data uses "{School} {Mascot}" ("Ohio
-State Buckeyes"). Checked directly: a normalize-and-prefix-match (handles
-'St.'<->'State') covers 337 of 460 distinct franchises, which works out
-to 73.9% of real 2013+ games having BOTH sides mapped -- the unmapped
-tail is overwhelmingly the same small-school/FCS "buy game" opponents
-already flagged as a real, separate problem elsewhere in this project
-(see decision_log.jsonl's CFB low-history-rating-floor entry) -- not a
-representative random 26%, a genuinely different (and lower-stakes, since
-CFB spread/moneyline already gate those games'  confidence separately)
-population. A team with no mapping gets the league-average fallback, same
-convention as every other trailing feature in this project.
+State Buckeyes"). A normalize-and-prefix-match, refined 2026-09-14 from
+its first version's 73.9% (see decision_log.jsonl for the before/after):
+
+  - Direct inspection of the real fetched data (469 distinct cfbfastR
+    names) found it standardizes on POSTAL/STANDARD ABBREVIATIONS for
+    state names inside a team name ("Central Mich.", "South Fla.",
+    "Southern Miss.") rather than spelling them out -- ABBREV_EXPANSIONS
+    below is that real, verified abbreviation table (every entry checked
+    against an actual cfbfastR name, not guessed), expanded as a
+    word-token pass so it applies regardless of position in the name.
+  - Accented characters ("San José") get stripped to their ASCII base
+    ("San Jose") via unicodedata -- cfbfastR's own data has no accents at
+    all, confirmed directly, so this is a one-directional normalization,
+    not a guess at how cfbfastR spells anything.
+  - Parenthetical qualifiers ("Miami (OH)") are stripped for the general
+    match -- necessary because most of them (small-school "(PA)"/"(MN)"
+    disambiguators) don't correspond to anything in cfbfastR's FBS-only
+    data anyway, so keeping them ONLY suppresses otherwise-real matches on
+    THIS data specifically. The one place stripping them blind would
+    create a genuine wrong-team collision (Miami (FL) vs Miami (OH), both
+    real FBS programs with real cfbfastR entries) is handled explicitly by
+    MANUAL_ALIASES below, checked BEFORE the general path ever runs.
+  - MANUAL_ALIASES: hand-verified, one-off cases the mechanical rules
+    above can't resolve because cfbfastR uses a genuinely different name
+    or acronym, not just an abbreviation of the same words (e.g. "NIU" for
+    Northern Illinois, "Southern California" for USC) -- each verified
+    directly against the real fetched data, not guessed.
+
+Coverage after this pass: see this module's own tests /
+research_cfbfastr_success_features.py's printed coverage line for the
+current real number. The remaining unmapped tail is overwhelmingly actual
+small-school/FCS "buy game" opponents with no cfbfastR entry to map TO at
+all (this data is FBS-focused) -- a real, different, lower-stakes
+population than a naming mismatch (CFB spread/moneyline already gate
+those games' confidence separately -- see decision_log.jsonl's CFB
+low-history-rating-floor entry). A team with no mapping gets the
+league-average fallback, same convention as every other trailing feature
+in this project.
 """
 
+import re
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
@@ -37,29 +67,105 @@ TRAILING_COLS = ["off_success_rate", "def_success_rate_allowed"]
 _team_name_cache = None
 _success_by_franchise_cache = None  # populated by load_team_game_success(), reused by get_current_trailing_success()
 
+# Real abbreviations cfbfastR's own team names use (verified directly
+# against the 469 distinct names in the fetched data -- see this module's
+# docstring). Keyed lowercase, without the trailing period (stripped
+# before lookup).
+ABBREV_EXPANSIONS = {
+    "ala": "alabama", "ariz": "arizona", "ark": "arkansas", "caro": "carolina",
+    "colo": "colorado", "conn": "connecticut", "fla": "florida", "ga": "georgia",
+    "ill": "illinois", "ind": "indiana", "ky": "kentucky", "la": "louisiana",
+    "mich": "michigan", "minn": "minnesota", "miss": "mississippi", "mo": "missouri",
+    "neb": "nebraska", "okla": "oklahoma", "ore": "oregon", "so": "southern",
+    "tenn": "tennessee", "tex": "texas", "va": "virginia", "val": "valley",
+    "wash": "washington", "wis": "wisconsin",
+}
+
+# Hand-verified one-off aliases the mechanical rules above genuinely can't
+# resolve -- keyed by the exact Vito franchise string (not normalized),
+# each checked directly against a real cfbfastR name present in the
+# fetched data (see this module's docstring for why each one exists).
+MANUAL_ALIASES = {
+    "USC Trojans": "Southern California",
+    "Army Black Knights": "Army West Point",
+    "Miami Hurricanes": "Miami (FL)",
+    "Miami (OH) RedHawks": "Miami (OH)",
+    "Northern Illinois Huskies": "NIU",
+    # These three groups would otherwise land in the automatic-collision-
+    # removal path above (multiple Vito franchise strings landing on one
+    # cfbfastR name) -- hand-verified safe unlike the general case,
+    # because EVERY variant shares the exact same real mascot (Vito-side
+    # duplicate spelling of one real team, e.g. "San Jose State" vs "San
+    # José St", not two different schools), confirmed directly against
+    # the collision list this refinement surfaced (see decision_log.jsonl).
+    "San Jose State Spartans": "San Jose St.",
+    "San José St Spartans": "San Jose St.",
+    "San José State Spartans": "San Jose St.",
+    "Central State (OH) Marauders": "Central St. (OH)",
+    "Central State Marauders": "Central St. (OH)",
+    "Cumberland (TN) Bulldogs": "Cumberland (TN)",
+    "Cumberland Bulldogs": "Cumberland (TN)",
+}
+
 
 def _normalize(name: str) -> str:
-    return name.replace("St.", "State").replace("'", "").lower().strip()
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = re.sub(r"\([^)]*\)", " ", name)  # strip parenthetical qualifiers, see docstring
+    name = name.replace("'", "")
+    words = []
+    for word in name.split():
+        word = word.rstrip(".").lower()
+        if word == "st":
+            words.append("state")
+        elif word in ABBREV_EXPANSIONS:
+            words.append(ABBREV_EXPANSIONS[word])
+        else:
+            words.append(word)
+    return " ".join(words).strip()
 
 
 def build_team_name_mapping(vito_franchise_names) -> dict:
-    """Real, tested prefix-match (see this module's docstring for the
-    honest 73.9%-of-games coverage number) -- `vito_franchise_names` is
-    this project's own set of CFB franchise strings (sports/cfb/loader.py's
+    """Real, tested normalize+prefix-match (see this module's docstring
+    for the full reasoning and current coverage number) -- `vito_franchise_names`
+    is this project's own set of CFB franchise strings (sports/cfb/loader.py's
     home_franchise/away_franchise), matched against whatever cfbfastR
-    team names are actually present in the fetched data."""
+    team names are actually present in the fetched data. MANUAL_ALIASES
+    is checked first, per franchise, before falling through to the
+    mechanical normalize+prefix path.
+
+    SAFETY, not just coverage: a real bug found and fixed during this
+    module's 2026-09-14 refinement -- greedy prefix-matching alone
+    produced 35 cases where TWO OR MORE genuinely different Vito
+    franchise strings matched the SAME cfbfastR name (e.g. "Arkansas
+    Monticello Boll Weevils", a real, different, small D2 program, prefix-
+    matching onto "Arkansas" the same as "Arkansas Razorbacks" does --
+    plain textual prefix-matching can't tell "{2-word school} {1-word
+    mascot}" apart from "{1-word school}{2-word continuation of the
+    SAME school's own full name}" without real school-identity knowledge
+    this function doesn't have). Confusing two real programs would be
+    worse than leaving both unmapped: it would silently blend an
+    unrelated team's success-rate history into a real program's trailing
+    features. Every such collision -- from the mechanical path ONLY, not
+    from MANUAL_ALIASES, which are hand-verified -- is therefore dropped
+    entirely below: both/all sides fall back to the league average
+    instead of either one risking a wrong match. This trades a small
+    amount of coverage for correctness, which is the right trade here."""
     if not DATA_PATH.exists():
         raise FileNotFoundError(
             f"{DATA_PATH} not found -- run `python3 scripts/fetch_cfbfastr_team_game_success.py` "
             f"from backend/ first (downloads real cfbfastR play-by-play, no API key needed)."
         )
-    cfbfastr_names = pd.read_csv(DATA_PATH, usecols=["team"])["team"].unique()
+    cfbfastr_names = set(pd.read_csv(DATA_PATH, usecols=["team"])["team"].unique())
     cfbfastr_norm = {}
     for n in cfbfastr_names:
         cfbfastr_norm.setdefault(_normalize(n), n)
 
     mapping = {}
+    fuzzy_matched = set()  # vito names matched via the mechanical path (not MANUAL_ALIASES) -- eligible for collision removal
     for v in vito_franchise_names:
+        if v in MANUAL_ALIASES and MANUAL_ALIASES[v] in cfbfastr_names:
+            mapping[v] = MANUAL_ALIASES[v]
+            continue
         vn = _normalize(v)
         best = None
         for cn, orig in cfbfastr_norm.items():
@@ -68,6 +174,22 @@ def build_team_name_mapping(vito_franchise_names) -> dict:
                     best = (cn, orig)
         if best:
             mapping[v] = best[1]
+            fuzzy_matched.add(v)
+
+    from collections import defaultdict
+    by_target = defaultdict(list)
+    for v in fuzzy_matched:
+        by_target[mapping[v]].append(v)
+    dropped = 0
+    for target, vs in by_target.items():
+        if len(vs) > 1:
+            for v in vs:
+                del mapping[v]
+                dropped += 1
+    if dropped:
+        print(f"[cfbfastr_features] dropped {dropped} ambiguous team-name match(es) "
+              f"(see build_team_name_mapping's docstring) -- those franchises fall back "
+              f"to the league average instead of risking a wrong match.")
     return mapping
 
 

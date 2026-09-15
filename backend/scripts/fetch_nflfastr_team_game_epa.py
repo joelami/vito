@@ -90,40 +90,53 @@ def aggregate_season(season: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main():
-    start = int(sys.argv[1]) if len(sys.argv) > 1 else 2006
-    end = int(sys.argv[2]) if len(sys.argv) > 2 else 2025
-
+def fetch_and_save(start: int, end: int, force_seasons: set = frozenset()) -> pd.DataFrame:
+    """
+    Callable core of this script, factored out of main() -- see
+    sports/cfb's equivalent fetch script's identical fetch_and_save() for
+    the full "why force_seasons exists" reasoning (the current,
+    still-in-progress season needs re-pulling on a schedule, not
+    skipping forever after its first appearance). Unlike CFB's version,
+    this is NOT safe to call in the main app process directly (nfl_data_py
+    hard-pins pandas<2.0 -- see this module's top docstring) -- callers
+    must run it via an isolated venv/subprocess (see
+    core/dataset_refresh.py) or a one-off manual invocation, never a
+    top-level import into main.py/scheduler.py.
+    """
     DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-    all_seasons = []
-    # Resume support: skip seasons already present in an existing output
-    # file -- a real need here, not speculative, since 20 seasons of
-    # sequential network downloads is a genuinely long-running job worth
-    # being safely interruptible/resumable rather than all-or-nothing.
-    already_done = set()
-    if OUT_PATH.exists():
-        existing = pd.read_csv(OUT_PATH)
-        already_done = set(existing["season"].unique())
-        all_seasons.append(existing)
-        print(f"[fetch_nflfastr] resuming -- {len(already_done)} season(s) already in {OUT_PATH}: {sorted(already_done)}")
+    existing = pd.read_csv(OUT_PATH) if OUT_PATH.exists() else pd.DataFrame()
+    already_done = set(existing["season"].unique()) if not existing.empty else set()
+    kept = existing[~existing["season"].isin(force_seasons)] if not existing.empty else existing
+    all_seasons = [kept] if not kept.empty else []
+    if already_done:
+        print(f"[fetch_nflfastr] resuming -- {len(already_done)} season(s) already in {OUT_PATH}: {sorted(already_done)}"
+              + (f", force-refreshing {sorted(force_seasons & already_done)}" if force_seasons & already_done else ""))
 
     for season in range(start, end + 1):
-        if season in already_done:
+        if season in already_done and season not in force_seasons:
             continue
         try:
             season_df = aggregate_season(season)
             all_seasons.append(season_df)
             # Save after EVERY season, not just at the end -- so a crash/
-            # interrupt partway through 20 seasons of downloads loses at
+            # interrupt partway through many seasons of downloads loses at
             # most one season's work, not the whole run.
             pd.concat(all_seasons, ignore_index=True).to_csv(OUT_PATH, index=False)
             print(f"[fetch_nflfastr] {season}: {len(season_df)} team-game rows -- saved to {OUT_PATH}")
         except Exception as e:
             print(f"[fetch_nflfastr] {season} FAILED: {e}", file=sys.stderr)
 
-    final = pd.concat(all_seasons, ignore_index=True)
+    final = pd.concat(all_seasons, ignore_index=True) if all_seasons else pd.DataFrame()
     print(f"[fetch_nflfastr] DONE -- {len(final)} total team-game rows across "
-          f"{final['season'].nunique()} seasons, saved to {OUT_PATH}")
+          f"{final['season'].nunique() if not final.empty else 0} seasons, saved to {OUT_PATH}")
+    return final
+
+
+def main():
+    start = int(sys.argv[1]) if len(sys.argv) > 1 else 2006
+    end = int(sys.argv[2]) if len(sys.argv) > 2 else 2025
+    force = {end} if "--force-last" in sys.argv else frozenset()
+    fetch_and_save(start, end, force_seasons=force)
 
 
 if __name__ == "__main__":

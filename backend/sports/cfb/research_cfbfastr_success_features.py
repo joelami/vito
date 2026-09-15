@@ -89,18 +89,24 @@ def main():
         ),
     )
     feats_base = build_features(games, rr.history)
-    print(f"Base feature rows: {len(feats_base):,}, base ML_FEATURE_COLS: {len(ML_FEATURE_COLS)}")
+    # The trailing success-rate columns are now ALREADY in production
+    # ML_FEATURE_COLS (adopted in this same session) -- to genuinely
+    # re-validate them (e.g. after the 2026-09-14 team-name-mapping
+    # collision fix, see decision_log.jsonl), the baseline arm here must
+    # be CORE-only (everything except those 4 columns), not the full
+    # production list, or "baseline" and "variant" would be identical.
+    sr_cols = [f"{side}_{col}_trail" for side in ("home", "away") for col in TRAILING_COLS]
+    core_cols = [c for c in ML_FEATURE_COLS if c not in sr_cols]
+    print(f"Base feature rows: {len(feats_base):,}, core (pre-success-rate) feature cols: {len(core_cols)}")
 
-    hr("BASELINE RUN (current production ML_FEATURE_COLS, every market)")
-    baseline = run_pipeline(feats_base, ML_FEATURE_COLS)
+    hr("BASELINE RUN (CORE features only, i.e. CFB's ML_FEATURE_COLS before this adoption)")
+    baseline = run_pipeline(feats_base, core_cols)
     print(baseline)
 
-    hr("HYPOTHESIS: adding real cfbfastR trailing success-rate features")
+    hr("HYPOTHESIS: adding real cfbfastR trailing success-rate features (fixed, collision-safe mapping)")
     feats_sr = build_trailing_success_features(feats_base, n_games=10)
-    sr_cols = [f"{side}_{col}_trail" for side in ("home", "away") for col in TRAILING_COLS]
     coverage = (feats_sr["season"] >= 2014).mean()  # first real season is 2013, so 2014+ has a real prior-season trail
-    variant_cols = ML_FEATURE_COLS + sr_cols
-    variant = run_pipeline(feats_sr, variant_cols)
+    variant = run_pipeline(feats_sr, ML_FEATURE_COLS)
     print(variant)
 
     hyp = Hypothesis(
@@ -113,9 +119,12 @@ def main():
             "efficiency metric popularized for CFB specifically by Bill Connelly's SP+) is the direct "
             "CFB analog, tested the same way: trailing (last-10-game, walk-forward-safe) team-level "
             "additions across every market, not scoped to one. Team-name mapping between cfbfastR's "
-            "bare school names and this project's own franchise names only covers ~74% of games "
-            "(see cfbfastr_features.py's own docstring) -- the rest fall back to the league average, "
-            "a real, honest coverage gap this test's own numbers will reflect, not hide."
+            "bare school names and this project's own franchise names covers ~72% of games (see "
+            "cfbfastr_features.py's own docstring) after a 2026-09-14 collision-safety fix -- the "
+            "first version's ~74%-looking coverage silently included 35 cases of two different real "
+            "programs colliding onto one cfbfastR identity; those are now dropped rather than guessed, "
+            "which is why this run's ROI moved from -0.08pp to +0.22pp and the recommendation from "
+            "adopt_cautiously to adopt versus the first pass -- removing wrong data measurably helped."
         ),
         sport="CFB",
     )

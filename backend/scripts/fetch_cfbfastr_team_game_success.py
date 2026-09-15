@@ -101,21 +101,37 @@ def aggregate_season(season: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main():
-    start = int(sys.argv[1]) if len(sys.argv) > 1 else 2013
-    end = int(sys.argv[2]) if len(sys.argv) > 2 else 2025
+def fetch_and_save(start: int, end: int, force_seasons: set = frozenset()) -> pd.DataFrame:
+    """
+    Callable core of this script, factored out of main() so
+    core/dataset_refresh.py can call it in-process on a schedule (CFB's
+    fetch has zero extra dependencies beyond pandas -- see this module's
+    own docstring -- so, unlike NFL's equivalent, it's safe to run
+    directly in the main app process, no isolated venv/subprocess needed).
 
+    `force_seasons`: seasons to re-fetch and OVERWRITE even if already
+    present -- real gap this closes: the plain resume-skip logic below is
+    correct for a genuinely COMPLETE historical season (immutable, no
+    reason to ever re-pull it) but wrong for the CURRENT, still-in-
+    progress season, which gains new completed games every week. Without
+    this, a periodic scheduler call would fetch the current season
+    exactly once (whenever it first appears in the CSV) and then skip it
+    forever, silently going stale for the rest of that entire season --
+    the same "loud once, then silent forever" bug class this project has
+    hit before (see core/matchup.py's _warned_missing_features comment).
+    """
     DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-    all_seasons = []
-    already_done = set()
-    if OUT_PATH.exists():
-        existing = pd.read_csv(OUT_PATH)
-        already_done = set(existing["season"].unique())
-        all_seasons.append(existing)
-        print(f"[fetch_cfbfastr] resuming -- {len(already_done)} season(s) already in {OUT_PATH}: {sorted(already_done)}")
+    existing = pd.read_csv(OUT_PATH) if OUT_PATH.exists() else pd.DataFrame()
+    already_done = set(existing["season"].unique()) if not existing.empty else set()
+    # keep every already-done season EXCEPT ones this call was told to force-refresh
+    kept = existing[~existing["season"].isin(force_seasons)] if not existing.empty else existing
+    all_seasons = [kept] if not kept.empty else []
+    if already_done:
+        print(f"[fetch_cfbfastr] resuming -- {len(already_done)} season(s) already in {OUT_PATH}: {sorted(already_done)}"
+              + (f", force-refreshing {sorted(force_seasons & already_done)}" if force_seasons & already_done else ""))
 
     for season in range(start, end + 1):
-        if season in already_done:
+        if season in already_done and season not in force_seasons:
             continue
         try:
             season_df = aggregate_season(season)
@@ -125,9 +141,16 @@ def main():
         except Exception as e:
             print(f"[fetch_cfbfastr] {season} FAILED: {e}", file=sys.stderr)
 
-    final = pd.concat(all_seasons, ignore_index=True)
+    final = pd.concat(all_seasons, ignore_index=True) if all_seasons else pd.DataFrame()
     print(f"[fetch_cfbfastr] DONE -- {len(final)} total team-game rows across "
-          f"{final['season'].nunique()} seasons, saved to {OUT_PATH}")
+          f"{final['season'].nunique() if not final.empty else 0} seasons, saved to {OUT_PATH}")
+    return final
+
+
+def main():
+    start = int(sys.argv[1]) if len(sys.argv) > 1 else 2013
+    end = int(sys.argv[2]) if len(sys.argv) > 2 else 2025
+    fetch_and_save(start, end)
 
 
 if __name__ == "__main__":

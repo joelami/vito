@@ -412,16 +412,19 @@ ML_FEATURE_COLS = [
     # Adopted ("adopt") via hypothesis test "cfb_season_week_adj" - see
     # decision_log.jsonl and this module's docstring.
     "season_week_adj",
-    # Adopted (adopt_cautiously) via hypothesis test
+    # Adopted ("adopt") via hypothesis test
     # "cfb_cfbfastr_trailing_success_rate_features" - real, direct CFB
     # analog of NFL's EPA/success-rate features (see decision_log.jsonl
     # and sports/cfb/cfbfastr_features.py's docstring): margin_corr
-    # +0.029, total_corr +0.005 (both above the noise floor), ROI -0.08pp
-    # within its own standard error. Team-name mapping between cfbfastR's
-    # bare school names and this project's own franchise names only
-    # covers ~74% of games - the rest fall back to a league-average
-    # value, same honest fallback convention as every other trailing
-    # feature here.
+    # +0.027, total_corr +0.002 (both above the noise floor), ROI +0.22pp.
+    # Re-measured 2026-09-14 after fixing a real collision bug in the
+    # team-name mapping (two different real programs were silently
+    # sharing one cfbfastR identity in ~35 cases) - the corrected,
+    # collision-safe mapping covers ~72% of games and produced a
+    # STRONGER result than the first pass (ROI was -0.08pp before the
+    # fix), upgrading the recommendation from adopt_cautiously to adopt.
+    # Unmapped teams fall back to a league-average value, same honest
+    # fallback convention as every other trailing feature here.
     "home_off_success_rate_trail", "home_def_success_rate_allowed_trail",
     "away_off_success_rate_trail", "away_def_success_rate_allowed_trail",
 ]

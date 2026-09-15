@@ -86,6 +86,27 @@ def _run_full(pipelines: dict = None):
     # circular import; by the time this function actually runs, both
     # modules are already fully loaded and a local import just resolves to
     # the same live main.py process, no re-execution.
+
+    # Pulls fresh nflverse/cfbfastR play-by-play for the CURRENT season
+    # before today's pipelines rebuild below, so the trailing EPA/success-
+    # rate features (adopted 2026-09-14, see decision_log.jsonl) stay
+    # current week-to-week in-season instead of frozen at whatever
+    # snapshot was on the volume when it was first populated -- see
+    # core/dataset_refresh.py's own docstring for why NFL and CFB use two
+    # different mechanisms here. Only on a genuine SCHEDULED call
+    # (`pipelines is None` -- see this function's own docstring above for
+    # that distinction), never the one-time boot-time kickoff: this can
+    # take minutes (an isolated venv's first-ever creation, a full season
+    # of play-by-play over HTTP) and boot-time already has a real,
+    # separate reason to stay fast. A caught exception here never blocks
+    # the actual pick-generation run below.
+    if pipelines is None:
+        try:
+            from core.dataset_refresh import refresh_all
+            refresh_all()
+        except Exception as e:
+            print(f"[scheduler] dataset refresh FAILED: {e}")
+
     for sport in LIVE_SPORTS:
         try:
             fresh_pipeline = harness.run(sport, pipeline=(pipelines or {}).get(sport))

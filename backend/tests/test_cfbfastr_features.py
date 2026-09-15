@@ -46,6 +46,20 @@ class TestNormalizeAndMapping:
         assert cf._normalize("Ohio St.") == "ohio state"
         assert cf._normalize("Hawai'i") == "hawaii"
 
+    def test_normalize_expands_real_cfbfastr_abbreviations(self):
+        # Every one of these is a REAL cfbfastR name, verified directly
+        # against the fetched data (see this module's docstring) -- not
+        # invented for this test.
+        assert cf._normalize("Central Mich.") == "central michigan"
+        assert cf._normalize("South Fla.") == "south florida"
+        assert cf._normalize("Southern Miss.") == "southern mississippi"
+
+    def test_normalize_strips_accents(self):
+        assert cf._normalize("San José St.") == cf._normalize("San Jose St.")
+
+    def test_normalize_strips_parenthetical_qualifiers(self):
+        assert cf._normalize("Miami (OH)") == "miami"
+
     def test_prefix_match_maps_franchise_with_mascot_to_bare_school_name(self, synthetic_success_csv):
         mapping = cf.build_team_name_mapping(["Ohio State Buckeyes"])
         assert mapping == {"Ohio State Buckeyes": "Ohio State"}
@@ -62,6 +76,46 @@ class TestNormalizeAndMapping:
         monkeypatch.setattr(cf, "DATA_PATH", tmp_path / "does_not_exist.csv")
         with pytest.raises(FileNotFoundError):
             cf.build_team_name_mapping(["Ohio State Buckeyes"])
+
+    def test_manual_alias_is_used_even_when_it_wouldnt_prefix_match(self, tmp_path, monkeypatch):
+        # "Northern Illinois Huskies" would never prefix-match "NIU" on
+        # text alone -- this only works via MANUAL_ALIASES (real,
+        # hand-verified entry -- see this module's docstring).
+        df = pd.DataFrame([{
+            "game_id": "g0", "season": 2024, "team": "NIU", "is_home": True,
+            "off_success_rate": 0.50, "off_plays": 65,
+            "def_success_rate_allowed": 0.45, "def_plays": 65,
+        }])
+        path = tmp_path / "success.csv"
+        df.to_csv(path, index=False)
+        monkeypatch.setattr(cf, "DATA_PATH", path)
+        cf._team_name_cache = None
+        mapping = cf.build_team_name_mapping(["Northern Illinois Huskies"])
+        assert mapping == {"Northern Illinois Huskies": "NIU"}
+        cf._team_name_cache = None
+
+    def test_two_different_real_schools_that_share_a_text_prefix_are_both_dropped(self, tmp_path, monkeypatch):
+        # Real bug this guards against, found 2026-09-14 in this exact
+        # module: "Arkansas Monticello Boll Weevils" (a real, different,
+        # small program) textually prefix-matches "Arkansas" the same way
+        # "Arkansas Razorbacks" correctly does -- plain prefix-matching
+        # can't tell them apart. Confusing the two would silently corrupt
+        # a real program's trailing feature with an unrelated team's data,
+        # which is worse than mapping neither -- both must come back
+        # unmapped (safe fallback to league average), not one arbitrarily
+        # "winning".
+        df = pd.DataFrame([{
+            "game_id": "g0", "season": 2024, "team": "Arkansas", "is_home": True,
+            "off_success_rate": 0.50, "off_plays": 65,
+            "def_success_rate_allowed": 0.45, "def_plays": 65,
+        }])
+        path = tmp_path / "success.csv"
+        df.to_csv(path, index=False)
+        monkeypatch.setattr(cf, "DATA_PATH", path)
+        cf._team_name_cache = None
+        mapping = cf.build_team_name_mapping(["Arkansas Razorbacks", "Arkansas Monticello Boll Weevils"])
+        assert mapping == {}
+        cf._team_name_cache = None
 
 
 class TestBuildTrailingSuccessFeatures:
