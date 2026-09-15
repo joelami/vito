@@ -38,6 +38,38 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 _data = {}
 
 
+def compute_history_opportunities(pipeline: dict) -> dict:
+    """
+    Precomputes edge_finder opportunities for every row in an NFL
+    pipeline's history_df -- an app-level view for the History browser
+    page, not part of the shared pipeline itself (harness.py has no use
+    for it). Real gap this closes (2026-09-14, app owner: "is there an
+    efficient way of doing [a refresh] cheap?"): this used to run ONLY at
+    server startup, inline, with no way to refresh it -- same class of bug
+    as the Ratings freeze, just not yet reported because it's a lower-
+    traffic page. Measured directly before assuming anything: 4,630 real
+    rows (of 5,431 total, the rest lack a walk-forward prediction) in
+    0.16s -- ~0.034ms/row, genuinely cheap. A full recompute every harness
+    cycle is not a real cost concern, so this stays the simple version
+    (recompute everything) rather than the incremental/persisted-cache
+    version that real cost would have justified -- see scheduler.py's
+    _run_full() for where this gets called on every refresh now.
+    """
+    history_df = pipeline["history_df"]
+    stds, ecfg = pipeline["stds"], pipeline["ensemble_cfg"]
+    history_opportunities = {}
+    for gid, row in history_df.iterrows():
+        if pd.isna(row.get("predicted_margin")):
+            history_opportunities[gid] = []
+            continue
+        opps = edge_finder.evaluate_game(row, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg, price_point="Close")
+        history_opportunities[gid] = [o.to_dict() for o in opps]
+        if opps:
+            ml = ensemble.moneyline_prob(row, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg)
+            history_df.loc[gid, "model_home_win_prob"] = ml["blended_prob"]
+    return history_opportunities
+
+
 # ---------------------------------------------------------------------------
 # Startup: build the entire NFL model pipeline once, in memory. This is the
 # same pattern the Hockey Scout App uses (CSV -> DataFrames at boot) rather
@@ -101,23 +133,7 @@ def startup():
 
     nfl_pipeline = build_sport_pipeline("NFL", persist_backtest=True)
     _data.update(nfl_pipeline)  # legacy flat access — every existing NFL-only route reads _data directly
-
-    # precompute opportunities for every historical game once (pure math, cheap) —
-    # an app-level view over the pipeline, not part of the shared pipeline itself
-    # since harness.py has no use for the full history browse list.
-    history_df = _data["history_df"]
-    stds, ecfg = _data["stds"], _data["ensemble_cfg"]
-    history_opportunities = {}
-    for gid, row in history_df.iterrows():
-        if pd.isna(row.get("predicted_margin")):
-            history_opportunities[gid] = []
-            continue
-        opps = edge_finder.evaluate_game(row, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg, price_point="Close")
-        history_opportunities[gid] = [o.to_dict() for o in opps]
-        if opps:
-            ml = ensemble.moneyline_prob(row, stds, nfl_config.ELO_POINTS_PER_MARGIN, ecfg)
-            history_df.loc[gid, "model_home_win_prob"] = ml["blended_prob"]
-    _data["history_opportunities"] = history_opportunities
+    _data["history_opportunities"] = compute_history_opportunities(nfl_pipeline)
 
     print(f"[startup] NFL: {len(_data['games'])} games loaded, {len(_data['oos_df'])} walk-forward "
           f"predictions, {len(_data['current_ratings'])} teams rated.")

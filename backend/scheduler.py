@@ -101,6 +101,12 @@ def _run_full(pipelines: dict = None):
                     # stay in sync with it or those routes go stale while
                     # Ratings correctly refreshes.
                     main._data.update(fresh_pipeline)
+                    # Same staleness class, the History browser's own
+                    # precomputed opportunities list (see main.py's
+                    # compute_history_opportunities -- measured cheap,
+                    # ~0.16s for the whole thing, so a full recompute here
+                    # every cycle is fine, no incremental cache needed).
+                    main._data["history_opportunities"] = main.compute_history_opportunities(fresh_pipeline)
         except Exception as e:
             print(f"[scheduler] {sport} full run FAILED: {e}")
 

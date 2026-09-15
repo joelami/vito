@@ -64,3 +64,12 @@ class TestSchedulerRefreshesMainData:
         src = _read("scheduler.py")
         full_run_body = src.split("def _run_full(")[1].split("\ndef ")[0]
         assert 'main._data.update(fresh_pipeline)' in full_run_body
+
+    def test_nfl_also_refreshes_history_opportunities(self):
+        # Same staleness class as the flattened _data view above, same
+        # real incident class (app owner: "is there an efficient way of
+        # doing this cheap?" -- measured, yes, ~0.16s for the whole NFL
+        # history, see main.py's compute_history_opportunities).
+        src = _read("scheduler.py")
+        full_run_body = src.split("def _run_full(")[1].split("\ndef ")[0]
+        assert 'main._data["history_opportunities"] = main.compute_history_opportunities(fresh_pipeline)' in full_run_body
