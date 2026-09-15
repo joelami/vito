@@ -166,6 +166,22 @@ a { color: inherit; }
 .subtitle-detail[open] summary::before { content: '▾ '; }
 .subtitle-detail summary:hover { color: var(--dim); }
 .subtitle-detail p { color: var(--dim); font-size: 11.5px; line-height: 1.65; margin: 8px 0 0; }
+
+/* Show all N / Show fewer toggle under a collapsed-by-default results
+   table (added 2026-09-16 -- app owner: "some of the tables are just way
+   way too long... should start out minimized with allowed to expand").
+   Sits directly under the table it controls, in the same card. */
+.table-expand-toggle {
+  text-align: center;
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+  border-top: 1px solid var(--border-light);
+  user-select: none;
+}
+.table-expand-toggle:hover { color: var(--dim); background: var(--surface); }
 .page-content { padding: 0 24px 44px; }
 
 /* ── Cards ──────────────────────────────────────────────────────────── */

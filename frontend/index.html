@@ -547,7 +547,7 @@
                           <template x-if="sortedForwardParlays().length === 0">
                             <tr><td colspan="6" class="empty-state">No parlays match the current filters.</td></tr>
                           </template>
-                          <template x-for="p in sortedForwardParlays()" :key="p.id">
+                          <template x-for="p in visibleForwardParlays()" :key="p.id">
                             <tr>
                               <td class="muted" data-label="Logged" x-text="fmtDate(p.snapshotted_at)"></td>
                               <td data-label="Legs" x-text="parlayLegSummary(p)"></td>
@@ -559,6 +559,10 @@
                           </template>
                         </tbody>
                       </table>
+                      <div class="table-expand-toggle" x-show="sortedForwardParlays().length > tablePageSize" @click="parlayTrack.expanded = !parlayTrack.expanded">
+                        <span x-show="!parlayTrack.expanded" x-text="'Show all ' + fmtInt(sortedForwardParlays().length) + ' parlays ▾'"></span>
+                        <span x-show="parlayTrack.expanded">Show fewer ▴</span>
+                      </div>
                     </div>
                   </div>
                 </template>
@@ -653,7 +657,7 @@
                           <template x-if="sortedForwardPicks(sp).length === 0">
                             <tr><td colspan="8" class="empty-state">No picks match the current filters.</td></tr>
                           </template>
-                          <template x-for="p in sortedForwardPicks(sp)" :key="p.id">
+                          <template x-for="p in visibleForwardPicks(sp)" :key="p.id">
                             <tr>
                               <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
                               <td data-label="Matchup">
@@ -672,6 +676,10 @@
                           </template>
                         </tbody>
                       </table>
+                      <div class="table-expand-toggle" x-show="sortedForwardPicks(sp).length > tablePageSize" @click="toggleSportExpanded(sp)">
+                        <span x-show="!livetrack.expandedSports[sp]" x-text="'Show all ' + fmtInt(sortedForwardPicks(sp).length) + ' picks ▾'"></span>
+                        <span x-show="livetrack.expandedSports[sp]">Show fewer ▴</span>
+                      </div>
                     </div>
                   </div>
                 </template>

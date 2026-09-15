@@ -1,6 +1,12 @@
 // ── Vito — Alpine.js SPA ─────────────────────────────────────────────────
 const API = ''; // same origin
 
+// Long, ever-growing result tables (Live Track Record's per-league picks,
+// the suggested-parlays track record) start collapsed to this many rows
+// and expand on request -- added 2026-09-16, app owner: "some of the
+// tables are just way way too long... should start out minimized."
+const TABLE_PAGE_SIZE = 15;
+
 async function apiGet(path) {
   const r = await fetch(API + path);
   if (!r.ok) throw new Error(`API ${r.status}: ${path}`);
@@ -207,6 +213,11 @@ function app() {
       bySport: {},   // sport -> /api/forward-test response
       sort: 'date', order: 'desc',
       filterMarket: 'ALL', filterConfidence: 'ALL', filterResult: 'ALL',
+      // Added 2026-09-16 (app owner: "some of the tables are just way way
+      // too long... should start out minimized with allowed to expand").
+      // Keyed by sport -- each league's picks table starts collapsed to
+      // TABLE_PAGE_SIZE rows independently of the others.
+      expandedSports: {},
     },
 
     parlayTrack: {
@@ -214,6 +225,7 @@ function app() {
       data: null,   // /api/forward-test/parlays response
       sort: 'snapshotted_at', order: 'desc',
       filterResult: 'ALL', filterLegCount: 'ALL',
+      expanded: false,
     },
 
     // Parlay tab's own "Build Your Own" leg-picker tables reuse the same
@@ -331,6 +343,13 @@ function app() {
     },
 
     get leagueOrder() { return LEAGUE_ORDER; },
+    // Same reason this needs a getter instead of referencing the bare
+    // top-level const directly from HTML: a top-level `const` in a
+    // classic script isn't guaranteed reachable from Alpine's expression
+    // evaluator the way a `this`-scoped property is (see leagueOrder's
+    // own identical pattern above) -- not worth risking on an unverified
+    // assumption when this costs one line.
+    get tablePageSize() { return TABLE_PAGE_SIZE; },
 
     leaguePicks(sport) {
       const d = this.suggestions.data;
@@ -612,6 +631,20 @@ function app() {
       return this.sortRows(picks, this.livetrack);
     },
 
+    // Collapsed-by-default view of the above (app owner, 2026-09-16:
+    // "some of the tables are just way way too long... should start out
+    // minimized with allowed to expand"). A settled-picks table only ever
+    // grows over a league's lifetime, so left unbounded it becomes the
+    // single longest thing on the page within a few weeks of real use.
+    visibleForwardPicks(sp) {
+      const all = this.sortedForwardPicks(sp);
+      return this.livetrack.expandedSports[sp] ? all : all.slice(0, TABLE_PAGE_SIZE);
+    },
+
+    toggleSportExpanded(sp) {
+      this.livetrack.expandedSports[sp] = !this.livetrack.expandedSports[sp];
+    },
+
     // Distinct confidence values actually present today, across every
     // league's settled+pending picks -- so the filter dropdown only ever
     // offers a real, current option (never a stale "Low" left over from
@@ -651,6 +684,12 @@ function app() {
         (filterLegCount === 'ALL' || p.leg_count === Number(filterLegCount))
       );
       return this.sortRows(parlays, this.parlayTrack);
+    },
+
+    // Same collapsed-by-default treatment as visibleForwardPicks above.
+    visibleForwardParlays() {
+      const all = this.sortedForwardParlays();
+      return this.parlayTrack.expanded ? all : all.slice(0, TABLE_PAGE_SIZE);
     },
 
     parlayLegSummary(p) {
