@@ -171,6 +171,9 @@ function app() {
       data: null,
       mlbProbables: {},   // espn_event_id -> {home, away}
       leagueFilter: 'ALL', // 'ALL' or a specific league (see leagueOrder) -- which section(s) show below the stat cards
+      filterMarket: 'ALL', filterConfidence: 'ALL',
+      sort: 'edge_pct', order: 'desc',
+      collapsed: {},      // sport -> bool, per-league section collapse (mobile scroll relief on a 100+-row day)
     },
 
     liveRecord: {
@@ -329,6 +332,38 @@ function app() {
       const d = this.suggestions.data;
       return (d && d.sports && d.sports[sport] && d.sports[sport].picks) || [];
     },
+
+    // Suggestions tab's own market/confidence filter + sortable columns --
+    // real need once 5 live leagues routinely add up to 100+ rows (app
+    // owner asked directly). Independent of parlayFilter (Parlay tab) and
+    // livetrack's filters (Live Track Record) -- three separate tables,
+    // three separate filter states, none of them silently affect another.
+    sortSuggestionsBy(col) { this.sortBy(this.suggestions, col); },
+
+    sortedSuggestionPicks(sport) {
+      const { filterMarket, filterConfidence } = this.suggestions;
+      const picks = this.leaguePicks(sport).filter(p =>
+        (filterMarket === 'ALL' || p.market === filterMarket) &&
+        (filterConfidence === 'ALL' || p.confidence === filterConfidence)
+      );
+      return this.sortRows(picks, this.suggestions);
+    },
+
+    get suggestionsConfidenceOptions() {
+      const seen = new Set();
+      for (const sp of this.leagueOrder) {
+        for (const p of this.leaguePicks(sp)) {
+          if (p.confidence) seen.add(p.confidence);
+        }
+      }
+      return [...seen].sort();
+    },
+
+    // Per-league collapse (mobile scroll relief) -- undefined reads as
+    // "expanded" so every section starts open, matching today's behavior;
+    // only clicking the header collapses one down.
+    isLeagueCollapsed(sport) { return !!this.suggestions.collapsed[sport]; },
+    toggleLeagueCollapsed(sport) { this.suggestions.collapsed[sport] = !this.isLeagueCollapsed(sport); },
 
     // Parlay tab's own market/confidence filter over the same live picks
     // Suggestions already loaded -- independent of Suggestions' own league

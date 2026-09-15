@@ -99,24 +99,52 @@
             <div class="empty-state" x-text="'No live ' + suggestions.leagueFilter + ' suggestions right now — try All, or check back once ' + suggestions.leagueFilter + ' games are on the board.'"></div>
           </template>
 
+          <template x-if="totalSuggestionCount > 0">
+            <div class="filter-bar">
+              <select class="select-filter" x-model="suggestions.filterMarket">
+                <option value="ALL">All markets</option>
+                <option value="moneyline">Moneyline</option>
+                <option value="spread">Spread</option>
+                <option value="total">Total</option>
+              </select>
+              <select class="select-filter" x-model="suggestions.filterConfidence">
+                <option value="ALL">All confidence</option>
+                <template x-for="c in suggestionsConfidenceOptions" :key="c">
+                  <option :value="c" x-text="c"></option>
+                </template>
+              </select>
+            </div>
+          </template>
+
           <template x-for="sp in leagueOrder" :key="sp">
             <template x-if="leaguePicks(sp).length && (suggestions.leagueFilter === 'ALL' || suggestions.leagueFilter === sp)">
               <div class="mb-20">
-                <div class="section-divider">
-                  <span x-text="sp + ' — ' + leaguePicks(sp).length + ' live suggestion' + (leaguePicks(sp).length === 1 ? '' : 's')"></span>
+                <div class="section-divider section-divider-collapsible" @click="toggleLeagueCollapsed(sp)">
+                  <span>
+                    <span class="collapse-caret" :class="{collapsed: isLeagueCollapsed(sp)}">▾</span>
+                    <span x-text="sp + ' — ' + leaguePicks(sp).length + ' live suggestion' + (leaguePicks(sp).length === 1 ? '' : 's')"></span>
+                  </span>
                   <span class="section-divider-detail" x-text="sportLastSyncedAt(sp) ? 'data as of ' + fmtDate(sportLastSyncedAt(sp)) : ''"></span>
                 </div>
-                <div class="card table-scroll">
+                <div class="card table-scroll" x-show="!isLeagueCollapsed(sp)">
                   <table class="data-table data-table-cards">
                     <thead>
                       <tr>
-                        <th>Date</th><th>Matchup</th><th>Market / Side</th>
-                        <th class="num">Odds</th><th class="num">Model Prob</th><th class="num">Market Fair Prob</th>
-                        <th class="num">Edge %</th><th>Confidence</th>
+                        <th class="sortable" :class="{sorted: suggestions.sort==='date'}" @click="sortSuggestionsBy('date')">Date</th>
+                        <th>Matchup</th>
+                        <th class="sortable" :class="{sorted: suggestions.sort==='market'}" @click="sortSuggestionsBy('market')">Market / Side</th>
+                        <th class="sortable num" :class="{sorted: suggestions.sort==='market_odds'}" @click="sortSuggestionsBy('market_odds')">Odds</th>
+                        <th class="sortable num" :class="{sorted: suggestions.sort==='model_prob'}" @click="sortSuggestionsBy('model_prob')">Model Prob</th>
+                        <th class="sortable num" :class="{sorted: suggestions.sort==='market_fair_prob'}" @click="sortSuggestionsBy('market_fair_prob')">Market Fair Prob</th>
+                        <th class="sortable num" :class="{sorted: suggestions.sort==='edge_pct'}" @click="sortSuggestionsBy('edge_pct')">Edge %</th>
+                        <th class="sortable" :class="{sorted: suggestions.sort==='confidence'}" @click="sortSuggestionsBy('confidence')">Confidence</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <template x-for="p in leaguePicks(sp)" :key="legKey(p)">
+                      <template x-if="sortedSuggestionPicks(sp).length === 0">
+                        <tr><td colspan="8" class="empty-state">No picks match the current filters.</td></tr>
+                      </template>
+                      <template x-for="p in sortedSuggestionPicks(sp)" :key="legKey(p)">
                         <tr>
                           <td class="muted" data-label="Date" x-text="fmtDate(p.date)"></td>
                           <td data-label="Matchup">
