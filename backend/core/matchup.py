@@ -71,7 +71,22 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
     def rest_days(team_row):
         if team_row is None or pd.isna(team_row.get("last_game_date")):
             return 7.0
-        return max((game_date - team_row["last_game_date"]).days, 0)
+        last = team_row["last_game_date"]
+        # Real pre-existing bug found while verifying the NHL xG feature
+        # end-to-end (2026-09-15): `game_date` is forced tz-naive just
+        # above, but NHL's own `date` column is tz-aware (datetime64[ns,
+        # UTC] -- verified directly, unlike NFL/MLB's tz-naive dates), so
+        # `last_game_date` here is tz-aware for NHL specifically. Subtracting
+        # a tz-naive Timestamp from a tz-aware one raises TypeError, which
+        # meant this generic path could never actually score a live NHL
+        # matchup at all (not specific to any one feature). Every other
+        # sport already has a tz-naive last_game_date, so this is a no-op
+        # for them -- fixed generically here rather than in NHL's own
+        # loader, since the real bug is this function assuming tz-naive
+        # without checking.
+        if getattr(last, "tzinfo", None) is not None:
+            last = last.tz_localize(None)
+        return max((game_date - last).days, 0)
 
     def col(row, name, default):
         if row is None:
