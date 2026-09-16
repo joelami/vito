@@ -131,3 +131,14 @@ class TestGetCurrentTrailingEpa:
     def test_returns_all_four_trailing_columns(self, synthetic_epa_csv):
         result = nf.get_current_trailing_epa("Kansas City Chiefs")
         assert set(result.keys()) == set(nf.TRAILING_COLS)
+
+    def test_missing_dataset_returns_neutral_fallback_not_a_crash(self, tmp_path, monkeypatch):
+        # Real incident, 2026-09-16: "/api/ratings?sport=NFL" was 404ing in
+        # production because this dataset was never uploaded to R2 -- this
+        # used to raise FileNotFoundError straight out of live matchup
+        # scoring; now it degrades to a neutral 0.0 fallback instead.
+        monkeypatch.setattr(nf, "DATA_PATH", tmp_path / "does_not_exist.csv")
+        nf._team_game_epa_cache = None
+        result = nf.get_current_trailing_epa("Kansas City Chiefs")
+        assert result == {col: 0.0 for col in nf.TRAILING_COLS}
+        nf._team_game_epa_cache = None

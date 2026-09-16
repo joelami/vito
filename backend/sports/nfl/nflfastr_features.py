@@ -83,7 +83,19 @@ def get_current_trailing_epa(franchise: str, n_games: int = 10) -> dict:
     """
     global _team_game_epa_cache
     if _team_game_epa_cache is None:
-        _team_game_epa_cache = load_team_game_epa()
+        try:
+            _team_game_epa_cache = load_team_game_epa()
+        except FileNotFoundError as e:
+            # Real incident this fixes (2026-09-16): the dataset file this
+            # reads hadn't been uploaded to R2 yet, so a Volume without it
+            # crashed every live NFL matchup score, not just training (see
+            # pipeline.py's _safe_add_trailing_feature() for the training-
+            # side fix and its own, fuller comment on the same incident).
+            # Neutral 0.0 fallback rather than a real league average, since
+            # there's no real data at all to average here.
+            print(f"[nflfastr_features] get_current_trailing_epa: dataset not available, "
+                  f"returning a neutral fallback: {e}")
+            return {col: 0.0 for col in TRAILING_COLS}
     epa = _team_game_epa_cache
     league_avg = {col: float(epa[col].mean()) for col in TRAILING_COLS}
 
@@ -296,11 +308,17 @@ def get_current_trailing_epa_sos_adjusted(franchise: str, n_games: int = 10) -> 
     get_current_trailing_epa() has to build_trailing_epa_features()).
     """
     global _adjusted_per_game_cache
-    if _adjusted_per_game_cache is None:
-        _adjusted_per_game_cache = _build_adjusted_per_game_table(n_games)
-    self_joined = _adjusted_per_game_cache
-    epa = load_team_game_epa()
-    league_avg_adj = {col: float(epa[col].mean()) for col in TRAILING_COLS}  # re-centered adjustment -> same mean as raw
+    try:
+        if _adjusted_per_game_cache is None:
+            _adjusted_per_game_cache = _build_adjusted_per_game_table(n_games)
+        self_joined = _adjusted_per_game_cache
+        epa = load_team_game_epa()
+        league_avg_adj = {col: float(epa[col].mean()) for col in TRAILING_COLS}  # re-centered adjustment -> same mean as raw
+    except FileNotFoundError as e:
+        # Same real incident/fix as get_current_trailing_epa() above.
+        print(f"[nflfastr_features] get_current_trailing_epa_sos_adjusted: dataset not available, "
+              f"returning a neutral fallback: {e}")
+        return {f"{col}_trail_sos": 0.0 for col in TRAILING_COLS}
 
     team_rows = self_joined[self_joined["franchise"] == franchise].sort_values("gameday", kind="stable")
     if team_rows.empty:

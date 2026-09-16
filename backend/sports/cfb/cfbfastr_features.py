@@ -238,11 +238,28 @@ def get_current_trailing_success(franchise: str, n_games: int = 10) -> dict:
     """
     global _success_by_franchise_cache
     if _success_by_franchise_cache is None:
-        raise RuntimeError(
-            "get_current_trailing_success() called before any load_team_game_success() call in this "
-            "process -- build the CFB pipeline (which calls build_trailing_success_features()) first, "
-            "so the real cfbfastR<->franchise name mapping exists."
-        )
+        # Real incident this fixes (2026-09-16): this used to hard-raise
+        # here, which was fine as long as build_trailing_success_features()
+        # always ran successfully during pipeline construction first (the
+        # normal case this docstring describes) -- but pipeline.py's
+        # _safe_add_trailing_feature() can now ALSO leave this cache empty
+        # on purpose, when the underlying dataset genuinely isn't
+        # available yet (not uploaded to R2), so the rest of the sport's
+        # pipeline can still build. A live matchup score landing here in
+        # that exact situation must degrade the same way training already
+        # did -- a neutral fallback, loudly logged -- not crash live
+        # scoring on top of an already-known, already-handled gap. Can't
+        # attempt to populate the cache HERE either: it needs this
+        # project's own full set of franchise names to build the real
+        # cfbfastR name mapping (only build_trailing_success_features()
+        # has that, via the games dataframe it's called with), not just
+        # the single `franchise` string this function receives -- calling
+        # load_team_game_success() with anything less would silently
+        # build and cache a broken, permanently-empty mapping.
+        print(f"[cfbfastr_features] get_current_trailing_success: no successful pipeline build has "
+              f"populated the cache yet (dataset likely unavailable) -- returning a neutral fallback "
+              f"for {franchise!r}.")
+        return {col: 0.0 for col in TRAILING_COLS}
     success = _success_by_franchise_cache
     league_avg = {col: float(success[col].mean()) for col in TRAILING_COLS}
 

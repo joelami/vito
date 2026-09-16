@@ -142,3 +142,17 @@ class TestGetCurrentTrailingEpaSosAdjusted:
         assert set(result.keys()) == {f"{c}_trail_sos" for c in nf.TRAILING_COLS}
         for v in result.values():
             assert isinstance(v, float)
+
+    def test_missing_dataset_returns_neutral_fallback_not_a_crash(self, tmp_path, monkeypatch):
+        # Real incident, 2026-09-16: see test_nflfastr_features.py's
+        # matching test for the full writeup -- same fix, applied here
+        # too since this is a separate live-scoring function with its own
+        # cache and its own (previously unguarded) call into
+        # load_team_game_epa().
+        monkeypatch.setattr(nf, "DATA_PATH", tmp_path / "does_not_exist.csv")
+        nf._team_game_epa_cache = None
+        nf._adjusted_per_game_cache = None
+        result = nf.get_current_trailing_epa_sos_adjusted("Arizona Cardinals")
+        assert result == {f"{c}_trail_sos": 0.0 for c in nf.TRAILING_COLS}
+        nf._team_game_epa_cache = None
+        nf._adjusted_per_game_cache = None

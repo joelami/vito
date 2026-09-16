@@ -26,13 +26,54 @@ from sports.nfl import config as nfl_config
 from sports.nfl.loader import load_games
 from sports.nfl.features import build_features, current_form_snapshot, ML_FEATURE_COLS
 from sports.nfl.weather import attach_weather
-from sports.nfl.nflfastr_features import build_trailing_epa_features, build_trailing_epa_features_sos_adjusted
+from sports.nfl.nflfastr_features import (
+    build_trailing_epa_features, build_trailing_epa_features_sos_adjusted, TRAILING_COLS as NFL_EPA_TRAILING_COLS,
+)
 
 
 def records(df: pd.DataFrame) -> list:
     if df is None or df.empty:
         return []
     return json.loads(df.replace([np.inf, -np.inf], np.nan).fillna(0).to_json(orient="records"))
+
+
+def _safe_add_trailing_feature(feats: pd.DataFrame, builder_fn, expected_cols: list, label: str) -> pd.DataFrame:
+    """
+    Real incident this fixes (2026-09-16, app owner: "the API is still
+    broken for NFL & CFB rankings"): both `build_trailing_epa_features()`
+    and CFB's `build_trailing_success_features()` are real (not
+    hypothetical) requirements on a dataset file added to R2 well after
+    this project's original bulk dataset set (see core/dataset_sync.py's
+    sync_file_if_missing()) -- and by design, `load_team_game_epa()`/
+    `load_team_game_success()` RAISE loudly rather than silently no-op if
+    that file isn't present yet, since a feature silently going all-NaN
+    is a worse, harder-to-notice bug class (see core/live_results.py's
+    own docstring for the precedent). That's the right call for the
+    LOADER -- but it meant a Volume that hasn't yet synced the new file
+    (e.g. because it was never uploaded to R2 in the first place, which
+    is exactly what happened here) took the ENTIRE sport's pipeline down
+    with it: main.py's own try/except around pipeline building caught the
+    crash and kept the app up (a real, separate, already-shipped fix),
+    but the practical effect was `/api/ratings?sport=NFL` and
+    `?sport=CFB` both 404ing outright -- contained, not actually fixed.
+
+    This is the actual fix: if the dataset genuinely isn't there yet,
+    fall back to a neutral 0.0 for just these columns (loud, one-time
+    warning, not a silent gap) so the REST of the sport's real signal
+    (Elo, box-score trailing stats, everything else already working)
+    still ships -- exactly the same "neutral default, warn don't crash"
+    discipline core/matchup.py's own live-scoring fallback already uses,
+    just applied here at TRAINING time too, which never had it.
+    """
+    try:
+        return builder_fn(feats)
+    except FileNotFoundError as e:
+        print(f"[pipeline] {label}: dataset not yet available, falling back to a neutral default for "
+              f"{len(expected_cols)} column(s) rather than failing the whole pipeline: {e}")
+        out = feats.copy()
+        for col in expected_cols:
+            out[col] = 0.0
+        return out
 
 
 def _sport_ensemble_config(sport_config) -> ensemble.EnsembleConfig:
@@ -101,14 +142,16 @@ def build_nfl_pipeline(persist_backtest: bool = True) -> dict:
     # improvement, margin_corr +0.0073/total_corr +0.0052, both past the
     # noise floor; ROI flat, not suspicious). ML_FEATURE_COLS below
     # already includes the 8 new columns this adds.
-    feats = build_trailing_epa_features(feats)
+    _nfl_epa_cols = [f"{side}_{c}_trail" for side in ("home", "away") for c in NFL_EPA_TRAILING_COLS]
+    feats = _safe_add_trailing_feature(feats, build_trailing_epa_features, _nfl_epa_cols, "NFL trailing EPA")
     # Adopted 2026-09-15 via hypothesis test "nfl_nflverse_trailing_epa_
     # sos_adjustment" (see decision_log.jsonl and that module's
     # build_trailing_epa_features_sos_adjusted() docstring) -- opponent-
     # adjusted counterpart to the raw trailing EPA above, real and
     # split-half-stable improvement. ML_FEATURE_COLS below already
     # includes the 8 new "_trail_sos" columns this adds.
-    feats = build_trailing_epa_features_sos_adjusted(feats)
+    _nfl_sos_cols = [f"{side}_{c}_trail_sos" for side in ("home", "away") for c in NFL_EPA_TRAILING_COLS]
+    feats = _safe_add_trailing_feature(feats, build_trailing_epa_features_sos_adjusted, _nfl_sos_cols, "NFL SOS-adjusted trailing EPA")
     wf = walk_forward_predict(feats, ML_FEATURE_COLS)
 
     # full history (left join) for browsing; OOS-only (inner join) for backtest/residual stats
@@ -257,8 +300,9 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
         # game_id/date/season columns, not raw games, to do its own team-game
         # ordinal join (see that module's docstring for why -- no date column in
         # the raw cfbfastR release).
-        from sports.cfb.cfbfastr_features import build_trailing_success_features
-        feats = build_trailing_success_features(feats)
+        from sports.cfb.cfbfastr_features import build_trailing_success_features, TRAILING_COLS as CFB_SUCCESS_TRAILING_COLS
+        _cfb_success_cols = [f"{side}_{c}_trail" for side in ("home", "away") for c in CFB_SUCCESS_TRAILING_COLS]
+        feats = _safe_add_trailing_feature(feats, build_trailing_success_features, _cfb_success_cols, "CFB trailing success rate")
     if sport == "nhl":
         # Adopted via hypothesis test "nhl_moneypuck_trailing_xg_features"
         # (see decision_log.jsonl and sports/nhl/moneypuck_xg_features.py's

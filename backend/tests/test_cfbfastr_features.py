@@ -189,9 +189,17 @@ class TestBuildTrailingSuccessFeatures:
 
 
 class TestGetCurrentTrailingSuccess:
-    def test_raises_clear_error_before_any_pipeline_build_in_this_process(self, synthetic_success_csv):
-        with pytest.raises(RuntimeError):
-            cf.get_current_trailing_success("Ohio State Buckeyes")
+    def test_returns_neutral_fallback_before_any_pipeline_build_in_this_process(self, synthetic_success_csv):
+        # Changed 2026-09-16 (real incident: "/api/ratings?sport=CFB" was
+        # 404ing in production because the underlying dataset genuinely
+        # wasn't uploaded to R2 yet) -- this used to hard-raise here, which
+        # was fine as long as a pipeline build always ran first in
+        # practice, but a live matchup score landing here with no
+        # successful pipeline build (e.g. because the dataset was
+        # unavailable and pipeline.py's own fallback never populated this
+        # cache) must degrade the same way training now does, not crash.
+        result = cf.get_current_trailing_success("Ohio State Buckeyes")
+        assert result == {col: 0.0 for col in cf.TRAILING_COLS}
 
     def test_returns_mean_of_most_recent_n_games(self, synthetic_success_csv):
         cf.load_team_game_success(["Ohio State Buckeyes"])  # populate the cache, as a real pipeline build would
