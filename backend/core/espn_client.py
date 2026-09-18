@@ -21,6 +21,7 @@ day, never redistributed.
 import json
 import urllib.request
 import urllib.error
+from datetime import datetime, timedelta
 
 from . import odds_math
 from .retry import with_retries
@@ -77,11 +78,47 @@ def fetch_scoreboard(sport: str, dates: str = None, timeout: float = 10.0) -> di
     """
     `dates` is either a single `YYYYMMDD` or a range `YYYYMMDD-YYYYMMDD`.
     Omit for "today" (ESPN's default).
+
+    Real incident, 2026-09-18 (app owner: "Vito has crashed... it's not
+    refreshing"): ESPN's own scoreboard endpoint silently stopped
+    accepting the `YYYYMMDD-YYYYMMDD` range form -- confirmed directly,
+    externally, not a guess: a plain `curl` against this exact endpoint
+    (no custom User-Agent, no auth, nothing this project's own request
+    could plausibly be doing wrong) returns 400 for ANY range, including
+    a 1-week one, across EVERY sport this project syncs (NFL/CFB/MLB/
+    NBA/NHL all checked directly) -- while a single `YYYYMMDD` date still
+    returns 200 exactly as before. Since harness.py's real sync window is
+    a range (`_date_range()`, ~19 days), this silently zeroed out every
+    sport's ESPN sync at once -- no new games, no new odds, no new picks,
+    which is exactly "not refreshing" app-wide, not a bug in anything
+    this project changed.
+
+    Fixed here, centrally, rather than at each call site: a range is
+    transparently split into one single-date request per day (still
+    real, still working) and the results merged into one combined
+    scoreboard-shaped response -- every existing caller (harness.py,
+    sports/mlb/probables.py) gets the fix for free, no call-site changes
+    needed. More requests than before (one per day instead of one for
+    the whole window), but each one is real and actually returns data,
+    which zero of the old range requests were doing anymore.
     """
     path = SPORT_PATHS.get(sport)
     if not path:
         raise ValueError(f"unsupported sport {sport!r}, known: {list(SPORT_PATHS)}")
     url = f"{BASE_URL}/{path}/scoreboard"
+
+    if dates and "-" in dates:
+        start_str, end_str = dates.split("-", 1)
+        start = datetime.strptime(start_str, "%Y%m%d")
+        end = datetime.strptime(end_str, "%Y%m%d")
+        merged_events = []
+        day = start
+        while day <= end:
+            day_result = _get_json(f"{url}?dates={day:%Y%m%d}", timeout)
+            merged_events.extend((day_result or {}).get("events", []) or [])
+            day += timedelta(days=1)
+        return {"events": merged_events}
+
     if dates:
         url += f"?dates={dates}"
     return _get_json(url, timeout)
