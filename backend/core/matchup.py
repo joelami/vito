@@ -111,6 +111,24 @@ def build_matchup_feature_row(sport: str, pipeline: dict, home_team: str, away_t
         "rating_diff_pre": home_rating - away_rating,
         "rest_diff": home_rest - away_rest,
         "home_rest_days": home_rest, "away_rest_days": away_rest,
+        # Real gap found and fixed 2026-11-07 (app owner: "take a look at
+        # this and make any necessary changes to make the algo better"):
+        # NBA's own home_b2b/away_b2b (ML_FEATURE_COLS, derived at training
+        # time in sports/nba/features.py as home_rest_days<=1) had NO live
+        # source at all -- confirmed directly, a real harness.run("NBA")
+        # call logged the exact "no live source supplies it" warning for
+        # both columns, meaning every live NBA pick defaulted to 0 (never
+        # back-to-back), silently wrong on real back-to-back games, for
+        # the entire time this feature has been live. home_rest/away_rest
+        # are ALREADY computed right above for every sport -- this is the
+        # exact same derivation training uses (rest_days<=1), just never
+        # wired through to live scoring. Added here generically (not only
+        # in NBA's own module) since the derivation only depends on
+        # values every sport already has, and no other sport's features.py
+        # defines these two column names with a different meaning
+        # (checked directly) -- harmless for every sport that doesn't use
+        # them (ML_FEATURE_COLS simply never references these keys).
+        "home_b2b": int(home_rest <= 1), "away_b2b": int(away_rest <= 1),
         "home_ats_pct_l10": col(home_row, "ats_pct_l10", 0.5),
         "away_ats_pct_l10": col(away_row, "ats_pct_l10", 0.5),
         "home_win_pct_l10": col(home_row, "win_pct_l10", 0.5),
