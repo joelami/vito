@@ -557,7 +557,23 @@ function app() {
           ? `Last refresh (${s.last_full_run_utc}) did not include ${this.ratings.league} — check for an error.`
           : 'No refresh has completed yet since this server started.';
       }
-      return `Last refreshed ${s.last_full_run_utc} UTC (next full run ~${s.full_run_at_utc} UTC daily)`;
+      let label = `Last refreshed ${s.last_full_run_utc} UTC (next full run ~${s.full_run_at_utc} UTC daily)`;
+      // Added 2026-10-12 (app owner: "why isn't the success rate dataset
+      // get refreshed everyday like it should?") -- the overall run
+      // completing successfully doesn't mean the underlying NFL/CFB
+      // in-season dataset pulls inside it actually worked (see
+      // core/dataset_refresh.py's refresh_all() for the real bug this
+      // visibility caught); only relevant on the two leagues that have
+      // this extra refresh step at all.
+      const dr = s.last_dataset_refresh;
+      if (dr && (this.ratings.league === 'NFL' || this.ratings.league === 'CFB')) {
+        const key = this.ratings.league.toLowerCase();
+        const sub = dr[key];
+        if (sub && sub.ok === false) {
+          label += ` — ⚠ in-season dataset refresh FAILED (${sub.detail ? sub.detail.slice(0, 120) : 'see server logs'})`;
+        }
+      }
+      return label;
     },
 
     switchRatingsLeague(sp) {

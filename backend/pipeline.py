@@ -310,8 +310,9 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
         # feats' own home_team_id/away_team_id/game_id/date columns (which
         # build_features() preserves unchanged from the raw loader output),
         # not a pre-build_features attach_*(games) hook.
-        from sports.nhl.moneypuck_xg_features import build_trailing_xg_features
-        feats = build_trailing_xg_features(feats)
+        from sports.nhl.moneypuck_xg_features import build_trailing_xg_features, TRAILING_COLS as NHL_XG_TRAILING_COLS
+        _nhl_xg_cols = [f"{side}_{c}_l10" for side in ("home", "away") for c in NHL_XG_TRAILING_COLS]
+        feats = _safe_add_trailing_feature(feats, build_trailing_xg_features, _nhl_xg_cols, "NHL trailing xG")
     wf = walk_forward_predict(feats, features.ML_FEATURE_COLS)
 
     history_df = feats.set_index("game_id").join(wf.predictions, how="left")

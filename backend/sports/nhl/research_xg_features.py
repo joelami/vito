@@ -87,19 +87,31 @@ def main():
     hr("BUILDING FEATURES (current production ML_FEATURE_COLS + trailing xG columns, both present)")
     feats = build_all_feats()
     xg_cols = [f"{side}_{c}_l10" for side in ("home", "away") for c in TRAILING_COLS]
+    # The xG columns are now ALREADY in production ML_FEATURE_COLS (adopted
+    # last session) -- re-run 2026-10-15 to validate the MoneyPuck TEAM-
+    # level rewrite (see moneypuck_xg_features.py's own top docstring: the
+    # original version approximated team xG as a per-skater mean; this
+    # rewrite reads the REAL team total directly, a genuine correctness
+    # fix, not just a refresh). To genuinely re-validate against a REAL
+    # no-xG baseline (not a no-op duplicate-columns comparison -- the exact
+    # mistake this script made before being fixed here), core_cols below
+    # excludes the 4 xG columns from ML_FEATURE_COLS, mirroring
+    # sports/cfb/research_cfbfastr_success_features.py's identical fix for
+    # the same "already adopted into production" situation.
+    core_cols = [c for c in ML_FEATURE_COLS if c not in xg_cols]
     from sports.nhl.moneypuck_xg_features import load_team_game_xg
     real_xg_games = load_team_game_xg(load_games())["game_id"].nunique()
-    print(f"Feature rows: {len(feats):,}, base ML_FEATURE_COLS: {len(ML_FEATURE_COLS)}, xG cols: {len(xg_cols)}")
+    print(f"Feature rows: {len(feats):,}, core (pre-xG) feature cols: {len(core_cols)}, xG cols: {len(xg_cols)}")
     print(f"Real (non-fallback) MoneyPuck xG coverage: {real_xg_games:,}/{len(feats):,} games "
           f"({real_xg_games / len(feats) * 100:.1f}%) -- the rest fall back to the league average, "
           f"reported here for honesty, not used to filter anything.")
 
-    hr("BASELINE RUN (current production ML_FEATURE_COLS -- no xG)")
-    baseline = run_pipeline(feats, ML_FEATURE_COLS)
+    hr("BASELINE RUN (CORE features only, i.e. NHL's ML_FEATURE_COLS before this feature's adoption)")
+    baseline = run_pipeline(feats, core_cols)
     print(baseline)
 
-    hr("HYPOTHESIS: adding trailing xG-for/xG-against (home/away)")
-    variant_cols = ML_FEATURE_COLS + xg_cols
+    hr("HYPOTHESIS: adding trailing xG-for/xG-against (home/away), rewritten team-level data")
+    variant_cols = core_cols + xg_cols
     variant = run_pipeline(feats, variant_cols)
     print(variant)
 
@@ -132,7 +144,7 @@ def main():
     stable = True
     for label, sub in [("first half", feats[feats["season"] < mid]),
                         ("second half", feats[feats["season"] >= mid])]:
-        b = run_pipeline(sub, ML_FEATURE_COLS)
+        b = run_pipeline(sub, core_cols)
         v = run_pipeline(sub, variant_cols)
         md, td = v["margin_corr"] - b["margin_corr"], v["total_corr"] - b["total_corr"]
         print(f"{label}: margin {b['margin_corr']:.4f}->{v['margin_corr']:.4f} ({md:+.4f}), "

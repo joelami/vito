@@ -50,6 +50,18 @@ scheduler_status = {
     "last_full_run_failed_sports": [],
     "last_sync_run_utc": None,
     "loop_started_utc": None,
+    # Added 2026-10-12 (app owner: "why isn't the success rate dataset get
+    # refreshed everyday like it should?") -- same real gap, one level
+    # deeper: the OVERALL run completing successfully (tracked above)
+    # doesn't mean dataset_refresh.refresh_all()'s two real subprocess-
+    # based fetches inside it actually worked -- it's wrapped in its own
+    # try/except specifically so a failure there never blocks the rest of
+    # the run (see core/dataset_refresh.py's module docstring), which
+    # means it could fail quietly, every single day, with the overall run
+    # still reporting success. See core/dataset_refresh.py's refresh_all()
+    # for the real, reproduced bug (a one-time pip-install failure
+    # permanently wedging the NFL venv) this visibility was built to catch.
+    "last_dataset_refresh": None,  # {"cfb": {"ok": bool, "detail": str, "timestamp": str}, "nfl": {...}}
 }
 
 
@@ -123,9 +135,13 @@ def _run_full(pipelines: dict = None):
     if pipelines is None:
         try:
             from core.dataset_refresh import refresh_all
-            refresh_all()
+            scheduler_status["last_dataset_refresh"] = refresh_all()
         except Exception as e:
             print(f"[scheduler] dataset refresh FAILED: {e}")
+            scheduler_status["last_dataset_refresh"] = {
+                "cfb": {"ok": False, "detail": f"refresh_all() itself raised: {e}"},
+                "nfl": {"ok": False, "detail": f"refresh_all() itself raised: {e}"},
+            }
 
     ok_sports, failed_sports = [], []
     for sport in LIVE_SPORTS:

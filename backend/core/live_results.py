@@ -124,8 +124,39 @@ def with_live_results(games: pd.DataFrame, sport: str, date_col: str = "date") -
     `current_form_snapshot()` actually need (home/away franchise, scores,
     date, season, neutral flag); anything else those functions don't touch
     stays NaN on the appended rows, which is fine — they're never read.
+
+    Real bug found and fixed 2026-10-15 (discovered verifying a real NHL
+    pipeline rebuild end-to-end): fetch_completed_espn_results() always
+    returns a tz-NAIVE `date` column (a deliberate choice matching NFL/
+    CFB/MLB/NBA's own bulk loaders, which are ALL tz-naive -- confirmed
+    directly). NHL's bulk loader is the one real exception -- its own
+    `date` column is tz-AWARE (datetime64[ns, UTC], confirmed directly) --
+    so concatenating tz-naive live rows onto it produced a column pandas
+    can't keep as one real datetime64 dtype (silently downgrades to
+    `object`, holding a genuine mix of tz-aware and tz-naive Timestamp
+    objects), which then crashed compute_power_ratings()'s own
+    sort_values() with a real, reproduced `TypeError: Cannot compare
+    tz-naive and tz-aware timestamps` -- meaning NHL's Elo ratings were
+    silently never actually seeing this season's real completed games at
+    all (this call raises every time it's attempted, so the exception
+    this project's own pipeline-building try/except catches would have
+    hidden it as "NHL pipeline FAILED to build" rather than a specific,
+    diagnosable tz mismatch). Fixed here, not in
+    fetch_completed_espn_results() itself (whose own tz-naive contract is
+    correct for 4 of 5 sports and shouldn't change) -- matches the live
+    rows' tz-awareness to whatever `games[date_col]` itself actually is,
+    checked directly rather than assumed, the same "don't guess, verify"
+    discipline core/matchup.py's own rest_days() tz fix (2026-09-15, see
+    decision_log.jsonl) already established for this exact NHL quirk.
     """
     live = fetch_completed_espn_results(sport, since_date=games[date_col].max())
     if live.empty:
         return games
+    target_tz_aware = games[date_col].dt.tz is not None
+    if target_tz_aware and live[date_col].dt.tz is None:
+        live = live.copy()
+        live[date_col] = live[date_col].dt.tz_localize("UTC")
+    elif not target_tz_aware and live[date_col].dt.tz is not None:
+        live = live.copy()
+        live[date_col] = live[date_col].dt.tz_localize(None)
     return pd.concat([games, live], ignore_index=True, sort=False)

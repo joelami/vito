@@ -1,8 +1,9 @@
 """
-Real team-level trailing expected-goals (xG) features built from MoneyPuck's
-free, already-downloaded skater-game files (Datasets/NHL/2008_to_2024 copy 2.csv
-+ 2025 copy.csv, situation=="all" rows). Direct successor to the already-
-adopted shot-differential/special-teams features (see decision_log.jsonl,
+Real team-level trailing expected-goals (xG) features built from
+MoneyPuck's free, TEAM-level per-game data (Datasets/NHL/
+moneypuck_team_game_xg.csv -- see scripts/fetch_moneypuck_team_xg.py for
+how it's built). Direct successor to the already-adopted shot-
+differential/special-teams features (see decision_log.jsonl,
 "nhl_trailing_shot_diff_and_pp_rate"/"nhl_trailing_pk_pct", and this
 project's own sports/nhl/features.py module docstring) -- modern hockey
 analytics (MoneyPuck, Evolving-Hockey, Natural Stat Trick) treats raw shot-
@@ -13,6 +14,34 @@ specifically because it separates shot VOLUME from shot QUALITY -- two
 teams with identical shot differentials can have very different real
 scoring-chance quality.
 
+REWRITTEN 2026-10-15 (app owner: "let's go back in with all of this
+season's data... and make the necessary changes"). The original version
+of this module (see git history / decision_log.jsonl's "nhl_moneypuck_
+trailing_xg_features" entry) read MoneyPuck's SKATER-level files
+(Datasets/NHL/"2008_to_2024 copy 2.csv" + "2025 copy.csv") and
+approximated team xG as the MEAN of each dressed skater's own on-ice xG
+(documented at the time as "not a literal team total, but a consistently-
+scaled... statistic that is monotonic with the true team total"). That
+module's own docstring ALSO flagged, honestly, that nothing refreshed
+those files for the current season at all -- confirmed directly while
+investigating why NHL's live trailing form looked stale: the local
+skater files topped out at MoneyPuck's own "season 2025" label (the
+2025-26 season), so every live NHL matchup this entire 2026-27 season was
+scoring off LAST season's trailing average, not this one's.
+
+Both problems share one real fix: MoneyPuck also publishes a real,
+free, keyless, nightly-updated TEAM-level file (confirmed directly,
+2026-10-12: https://moneypuck.com/moneypuck/playerData/careers/gameByGame/
+all_teams.csv, "updated nightly" per MoneyPuck's own data page) whose
+`position=="Team Level"` rows carry the REAL team xGoalsFor/xGoalsAgainst
+directly -- no skater-averaging approximation needed at all, and (unlike
+the old static files) genuinely re-fetchable, so it can be kept current
+in-season the same way NFL's EPA / CFB's success-rate datasets already
+are (see core/dataset_refresh.py). Re-validated via sports/nhl/
+research_xg_features.py after this rewrite -- see decision_log.jsonl for
+the real, re-measured fit numbers (full sample + required split-half
+check) against the CORRECTED, non-approximated data.
+
 JOIN: MoneyPuck's `gameId` (real NHL API game ids) has no shared key with
 this project's own `game_id` -- this is the exact problem
 sports/nhl/research_player_matchup.py already solved and verified (its
@@ -21,54 +50,36 @@ tolerance). Mirrored here directly rather than imported from that module --
 that script is throwaway research, not production code, the same
 relationship sports/nfl/nflfastr_features.py has to its own one-off fetch
 script (self-contained production module, not a dependency on a research
-script that could be edited/removed independently).
-
-AGGREGATION -- the one real design decision this module makes on its own:
-MoneyPuck's on-ice xG columns (OnIce_F_xGoals/OnIce_A_xGoals) are recorded
-PER SKATER -- once per player, for every shot taken while that specific
-player was on the ice. Multiple skaters share credit for the same shot (at
-any moment roughly 5 skaters are on the ice together, more at 5-on-5 which
-is the bulk of game time), so literally SUMMING every dressed skater's
-on-ice xG for a team-game would ~5x overcount real team xG (verified
-directly: inspecting one real game's raw rows shows materially different
-OnIce_F_xGoals per skater on the same team-game, driven by real shift/
-ice-time overlap differences, not a shared team total already sitting in
-this file). Team-game xg_for/xg_against here is computed as the MEAN of
-OnIce_F_xGoals/OnIce_A_xGoals across all of that team's dressed skaters
-(situation=="all" -- all strengths combined, same all-strengths filter
-research_player_matchup.py and shot_diff_l10's shots_for/shots_against
-already use) for that game -- NOT a literal team total, but a
-consistently-scaled per-team-game statistic (~team_total / (avg skaters
-on ice), a roughly constant divisor across teams/games) that is monotonic
-with the true team total and therefore carries identical signal for a
-tree-based model (HistGradientBoostingRegressor, used throughout this
-project's walk-forward pipeline, is invariant to monotonic per-feature
-rescaling) -- documented here explicitly so this choice is never mistaken
-for a naive-sum bug by a future reader.
+script that could be edited/removed independently). Unchanged by this
+rewrite -- the join problem and its solution are the same regardless of
+whether the upstream rows are skater- or team-level.
 
 TRAILING, walk-forward-safe by construction: exactly the same "last N
 games, shift-then-roll, never includes the game being predicted" pattern
 shot_diff_l10/pp_pct_l10/pk_pct_l10 already use in sports/nhl/features.py.
 
-CACHING: load_team_game_xg() always re-reads the raw MoneyPuck CSVs fresh
-(no stale module-level cache) -- the exact discipline
-sports/nfl/nflfastr_features.py's load_team_game_epa() follows, learned
-from a real caching bug found and fixed 2026-09-15 in that exact file (see
-its reset_caches() docstring): a cache that only populates once and never
-invalidates silently freezes a trailing feature at whatever snapshot
-existed at process boot, even as the underlying data changes on disk.
-get_current_trailing_xg() (the live-scoring path, called per matchup, not
-once per pipeline build) DOES cache the expensive joined+aggregated
-per-team-game table -- re-reading+re-joining the ~2.6GB raw CSV on every
-live matchup call would be needlessly slow, and correctness only requires
-that cache be invalidatable, not that it never exist -- via reset_caches(),
-same interface as nflfastr_features.reset_caches(). Honest difference from
-NFL/CFB: nothing in core/dataset_refresh.py currently re-fetches this
-MoneyPuck snapshot periodically (it's a static already-downloaded file, not
-pulled from a live API on a schedule the way nflverse/cfbfastR are) -- so
-reset_caches() is provided for correctness and interface parity if that
-ever changes, but is not currently wired into scheduler.py's daily refresh,
-since there is nothing scheduled to refresh it against.
+CACHING: load_team_game_xg() always re-reads the raw CSV fresh (no stale
+module-level cache) -- the exact discipline sports/nfl/nflfastr_features.py's
+load_team_game_epa() follows, learned from a real caching bug found and
+fixed 2026-09-15 in that exact file (see its reset_caches() docstring): a
+cache that only populates once and never invalidates silently freezes a
+trailing feature at whatever snapshot existed at process boot, even as
+the underlying data changes on disk. get_current_trailing_xg() (the
+live-scoring path, called per matchup, not once per pipeline build) DOES
+cache the expensive joined per-team-game table -- correctness only
+requires that cache be invalidatable, not that it never exist -- via
+reset_caches(), same interface as nflfastr_features.reset_caches(), now
+ALSO actually wired into core/dataset_refresh.py's refresh_all() (the
+real gap this rewrite closes -- see that module's own docstring).
+
+Missing-dataset handling matches NFL/CFB's own convention exactly (see
+core/dataset_refresh.py's module docstring and pipeline.py's
+_safe_add_trailing_feature() for the real production incident, 2026-09-16,
+that established this pattern): both load_team_game_xg() and
+get_current_trailing_xg() raise/degrade on a genuinely missing file the
+same honest way those two sports' equivalents do, rather than crashing an
+entire sport's pipeline the way an earlier, unguarded version of this
+exact wiring did before that incident.
 """
 
 from pathlib import Path
@@ -76,8 +87,7 @@ from pathlib import Path
 import pandas as pd
 
 DATASETS_DIR = Path(__file__).parent.parent.parent.parent / "Datasets" / "NHL"
-MP_FILE_OLD = DATASETS_DIR / "2008_to_2024 copy 2.csv"   # 2008-2024, skaters, detailed per-situation format
-MP_FILE_NEW = DATASETS_DIR / "2025 copy.csv"             # 2025-current, same format
+DATA_PATH = DATASETS_DIR / "moneypuck_team_game_xg.csv"
 
 # MoneyPuck 3-letter team code -> this project's canonical numeric team_id.
 # Identical mapping already verified directly against the full unique
@@ -90,7 +100,9 @@ MP_FILE_NEW = DATASETS_DIR / "2025 copy.csv"             # 2025-current, same fo
 # the Atlanta Thrashers/Winnipeg Jets' single continuous team_id (28) the
 # same way config.py's own docstring documents that franchise -- both
 # targets are ALREADY the canonical id, so no separate
-# config.canonical_team_id() call is needed downstream.
+# config.canonical_team_id() call is needed downstream. Unchanged by the
+# 2026-10-15 rewrite -- this new file uses the identical 3-letter codes
+# (`team`/`playerTeam` columns), confirmed directly.
 MONEYPUCK_CODE_TO_TEAM_ID = {
     "ANA": 25, "ARI": 129764, "ATL": 28, "BOS": 1, "BUF": 2, "CAR": 7, "CBJ": 29,
     "CGY": 3, "CHI": 4, "COL": 17, "DAL": 9, "DET": 5, "EDM": 6, "FLA": 26,
@@ -103,20 +115,32 @@ TRAILING_COLS = ["xg_for", "xg_against"]
 ROLL_WINDOW = 10  # same trailing window every other NHL feature uses -- see features.py's ROLL_WINDOW
 
 
-def _load_raw_skater_xg() -> pd.DataFrame:
-    """Raw MoneyPuck skater-game rows, filtered to situation=="all" (all
-    strengths combined -- one row per skater per game, no double counting
-    across 5v5/5v4/4v5/etc., same filter research_player_matchup.py uses),
-    with team codes mapped to this project's numeric team_id."""
-    cols = ["gameId", "season", "playerTeam", "opposingTeam", "home_or_away",
-            "gameDate", "position", "situation", "OnIce_F_xGoals", "OnIce_A_xGoals"]
-    old = pd.read_csv(MP_FILE_OLD, usecols=cols)
-    new = pd.read_csv(MP_FILE_NEW, usecols=cols)
-    raw = pd.concat([old, new], ignore_index=True)
-    raw = raw[raw["situation"] == "all"].copy()
+def _load_raw_team_xg() -> pd.DataFrame:
+    """Raw MoneyPuck TEAM-level rows (already filtered to position=="Team
+    Level" and situation=="all" by the fetch script -- see its own
+    docstring), with team codes mapped to this project's numeric team_id.
+    Raises FileNotFoundError with a clear message if the dataset hasn't
+    been fetched yet -- same "raise loudly, don't silently go all-NaN"
+    convention as sports/nfl/nflfastr_features.py's load_team_game_epa()."""
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"{DATA_PATH} not found -- run `python3 scripts/fetch_moneypuck_team_xg.py` "
+            f"from backend/ first (downloads real MoneyPuck team-game data, no API key needed)."
+        )
+    raw = pd.read_csv(DATA_PATH)
     raw["team_id"] = raw["playerTeam"].map(MONEYPUCK_CODE_TO_TEAM_ID)
     raw["opp_team_id"] = raw["opposingTeam"].map(MONEYPUCK_CODE_TO_TEAM_ID)
     raw = raw.dropna(subset=["team_id", "opp_team_id"]).copy()
+    # Real bug found and fixed 2026-10-15 while verifying this rewrite:
+    # .map() against a dict of int VALUES still upcasts the whole column to
+    # float64 the moment ANY row fails to map (NaN forces float, even
+    # before dropna() removes those rows) -- `games`' own home_team_id/
+    # away_team_id are real int64, and merge_asof's `by=` columns refuse a
+    # float64-vs-int64 mismatch outright (a real, loud MergeError, not a
+    # silent wrong join) -- caught here by actually running the join, not
+    # assumed safe from reading the code.
+    raw["team_id"] = raw["team_id"].astype("int64")
+    raw["opp_team_id"] = raw["opp_team_id"].astype("int64")
     raw["date"] = pd.to_datetime(raw["gameDate"], format="%Y%m%d")
     return raw
 
@@ -125,7 +149,9 @@ def _build_gameid_map(raw: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     """MoneyPuck gameId -> our game_id, via (home_team_id, away_team_id,
     nearest date, 1-day tolerance) -- the exact join already solved and
     verified in research_player_matchup.py's build_gameid_map(), mirrored
-    here (see module docstring for why this isn't a shared import)."""
+    here (see module docstring for why this isn't a shared import).
+    Unchanged by the 2026-10-15 rewrite -- same join, same solution,
+    regardless of whether the upstream rows are skater- or team-level."""
     home_rows = raw[raw["home_or_away"] == "HOME"][["gameId", "team_id", "opp_team_id", "date"]].rename(
         columns={"team_id": "home_team_id", "opp_team_id": "away_team_id"})
     home_rows = home_rows.drop_duplicates(subset=["gameId"]).sort_values("date")
@@ -147,19 +173,25 @@ def load_team_game_xg(games: pd.DataFrame = None) -> pd.DataFrame:
     """
     One row per (game_id, team_id) with real `xg_for`/`xg_against` (our own
     canonical game_id/team_id space) -- always re-reads the raw MoneyPuck
-    CSVs fresh (see module docstring's CACHING section). `games` defaults
+    CSV fresh (see module docstring's CACHING section). `games` defaults
     to sports.nhl.loader.load_games() if not supplied (tests pass a small
     synthetic frame instead) -- must carry `game_id`/`home_team_id`/
     `away_team_id`/`date` (loader.py's own shape) for the join.
+
+    No more per-skater groupby-mean needed (the 2026-10-15 rewrite's real
+    simplification): the raw rows are already one real row per
+    (gameId, team), so each team-game's xg_for/xg_against IS the raw
+    value directly -- only the post-join merge_asof dedup below (needed
+    because the DATE-based join itself, not the source data, can rarely
+    collide two different MoneyPuck gameIds onto the same game_id) still
+    needs its own groupby-mean.
     """
     if games is None:
         from sports.nhl.loader import load_games
         games = load_games()
 
-    raw = _load_raw_skater_xg()
-    per_game = raw.groupby(["gameId", "team_id"], as_index=False)[
-        ["OnIce_F_xGoals", "OnIce_A_xGoals"]
-    ].mean().rename(columns={"OnIce_F_xGoals": "xg_for", "OnIce_A_xGoals": "xg_against"})
+    raw = _load_raw_team_xg()
+    per_game = raw[["gameId", "team_id", "xg_for", "xg_against"]].drop_duplicates(subset=["gameId", "team_id"])
 
     gid_map = _build_gameid_map(raw, games)
     per_game = per_game.merge(gid_map, on="gameId", how="inner")
@@ -229,7 +261,7 @@ def get_current_trailing_xg(team_id, n_games: int = ROLL_WINDOW) -> dict:
     columns to 0.0 for every live NHL prediction the moment they join
     ML_FEATURE_COLS (core/matchup.py's own neutral-fallback warning), an
     extreme, wrong value (0.0 expected goals is nowhere near a real
-    team-game total, ~2.9 goals).
+    team-game total, ~2.87 in this data).
 
     `team_id` is this project's own canonical numeric team_id (see
     config.canonical_team_id) -- the same identity space home_franchise/
@@ -237,13 +269,51 @@ def get_current_trailing_xg(team_id, n_games: int = ROLL_WINDOW) -> dict:
     docstring: NHL's "franchise" identity literally IS the numeric
     team_id).
 
-    Returns league-average fallback (this data's own real mean) for a
-    team_id with no matched rows at all -- same convention as every other
-    trailing feature's cold-start handling in this project.
+    Real bug found and fixed 2026-10-15, discovered while verifying the
+    MoneyPuck rewrite's claim to finally see this season's real games
+    live: this used to call load_team_game_xg() -- which, with no
+    `games` argument, defaults to sports.nhl.loader.load_games(), the
+    STATIC BULK historical CSV that (same as NFL's/CFB's own bulk files)
+    does not yet contain ANY 2026-27 season rows. load_team_game_xg()'s
+    own gid_map join is an INNER join against that bulk `games` table --
+    so even though the refreshed MoneyPuck data genuinely has this
+    season's real games, every one of them was silently dropped before
+    ever reaching this function, because there was no row in the bulk
+    table to join them onto. Confirmed directly: Boston's own cached
+    trailing rows topped out at December 2025 even after a fresh fetch
+    that demonstrably included October 2026 rows in the raw file.
+
+    Real fix, mirroring get_current_trailing_epa()'s OWN actual design
+    (re-checked directly, not assumed): that function never joins to this
+    project's own `games`/game_id at all for the LIVE path -- it reads
+    the raw per-franchise rows straight from its own data source, sorted
+    by date, and takes the most recent N. There is no need for a
+    game_id match here either: "this team's own most recent real games"
+    doesn't require matching them to OUR schedule at all, only
+    build_trailing_xg_features() (the TRAINING path, which attaches
+    values onto our own historical rows) actually needs that join. This
+    now reads directly from _load_raw_team_xg(), the same way
+    get_current_trailing_epa() reads directly from load_team_game_epa().
+
+    Returns a neutral 0.0 fallback (NOT the league average) if the
+    dataset genuinely isn't available at all -- same convention
+    pipeline.py's _safe_add_trailing_feature() and NFL/CFB's equivalent
+    live-scoring functions established 2026-09-16 after a real production
+    incident (see core/dataset_refresh.py's module docstring) -- and the
+    real league-average fallback (this data's own mean) for a team_id
+    with no matched rows but the dataset itself IS present, same
+    convention as every other trailing feature's cold-start handling.
     """
     global _team_game_xg_cache
     if _team_game_xg_cache is None:
-        _team_game_xg_cache = load_team_game_xg()
+        try:
+            raw = _load_raw_team_xg()
+            _team_game_xg_cache = raw[["team_id", "date", "xg_for", "xg_against"]].drop_duplicates(
+                subset=["team_id", "date", "xg_for", "xg_against"])
+        except FileNotFoundError as e:
+            print(f"[moneypuck_xg_features] get_current_trailing_xg: dataset not available, "
+                  f"returning a neutral fallback: {e}")
+            return {f"{c}_l10": 0.0 for c in TRAILING_COLS}
     xg = _team_game_xg_cache
     league_avg = {col: float(xg[col].mean()) for col in TRAILING_COLS}
 
@@ -255,12 +325,12 @@ def get_current_trailing_xg(team_id, n_games: int = ROLL_WINDOW) -> dict:
 
 
 def reset_caches() -> None:
-    """See module docstring's CACHING section -- clears the cached
-    joined+aggregated per-team-game table get_current_trailing_xg() uses.
-    Not currently wired into any scheduled refresh (nothing re-fetches this
-    MoneyPuck snapshot periodically today, see module docstring) -- exists
-    for correctness and interface parity with
-    sports/nfl/nflfastr_features.reset_caches() if that ever changes.
-    Always safe to call (a no-op if the cache was never populated)."""
+    """See module docstring's CACHING section -- clears the cached joined
+    per-team-game table get_current_trailing_xg() uses. Now ACTUALLY wired
+    into core/dataset_refresh.py's refresh_all() (the real gap the
+    2026-10-15 rewrite closes -- see that module's own docstring and this
+    module's top docstring), the same way sports/nfl/nflfastr_features.
+    reset_caches() already is. Always safe to call (a no-op if the cache
+    was never populated)."""
     global _team_game_xg_cache
     _team_game_xg_cache = None
