@@ -349,19 +349,28 @@ def total_side_confidence_tier(side: str) -> str:
 
 def unvalidated_confidence_tier() -> str:
     """
-    App-owner decision (2026-09-03), not a technical finding: for the four
+    App-owner decision (2026-09-03), not a technical finding: for the
     market/sport combinations where confidence_tier() is proven backwards
     with NO validated replacement found after real investigation --
-    NBA moneyline, NBA spread, MLB spread, CFB spread -- showing a
-    High/Medium/Low label at all is actively worse than showing nothing,
-    because a confidence badge that's been directly measured to be
-    backwards is misleading, not just unhelpful. Every real mechanism
-    tried for these four (market agreement/disagreement, edge magnitude,
-    home/away split, favorite/underdog split -- see market_agreement_
-    confidence_tier(), spread_market_disagreement_confidence_tier(), and
-    edge_magnitude_confidence_tier()'s docstrings, plus the honest null
-    result logged in decision_log.jsonl for this exact investigation)
-    failed to produce a real, stable signal.
+    originally NBA moneyline, NBA spread, MLB spread, CFB spread, since
+    joined by CFB total (gated 2026-09-14, precautionary on watch-level
+    evidence at the time, later confirmed by a much larger live sample)
+    and CFB moneyline (gated 2026-11-07, after a real, current-data check
+    found it backwards with n=121 settled picks and the one mechanism
+    with real cross-sport precedent -- market_agreement_confidence_tier's
+    FAV/DOG split -- came back with zero signal AND a sign-flipping
+    split-half on CFB's own confidence-blind population, see
+    edge_finder.py's MONEYLINE_UNVALIDATED_SPORTS comment and
+    decision_log.jsonl for the full numbers) -- showing a High/Medium/Low
+    label at all is actively worse than showing nothing, because a
+    confidence badge that's been directly measured to be backwards is
+    misleading, not just unhelpful. Every real mechanism tried for these
+    (market agreement/disagreement, edge magnitude, home/away split,
+    favorite/underdog split -- see market_agreement_confidence_tier(),
+    spread_market_disagreement_confidence_tier(), and edge_magnitude_
+    confidence_tier()'s docstrings, plus the honest null results logged
+    in decision_log.jsonl for each investigation) failed to produce a
+    real, stable signal.
 
     Chosen over hiding these picks entirely: they still cleared a real,
     walk-forward-validated edge threshold (min_edge_pct via BacktestConfig)

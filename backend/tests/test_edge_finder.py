@@ -183,19 +183,38 @@ class TestReconcileUnvalidatedConfidence:
         assert changed == 0
         assert confidence_of(conn, 1) == "High"
 
-    def test_catches_extreme_underdog_moneyline_regardless_of_sport_set_membership(self, conn):
-        # CFB moneyline itself is NOT in MONEYLINE_UNVALIDATED_SPORTS -- this
-        # row is only caught via MAX_MONEYLINE_UNDERDOG_ODDS's own rule.
-        insert_pick(conn, 1, "CFB", "moneyline", settled=0, confidence="Medium", market_odds=15.0)
+    def test_catches_extreme_underdog_moneyline_regardless_of_sport_set_membership(self, conn, monkeypatch):
+        # Isolates MAX_MONEYLINE_UNDERDOG_ODDS's own rule from the blanket
+        # MONEYLINE_UNVALIDATED_SPORTS gate -- real as of 2026-11-07, CFB
+        # is in BOTH sets (see MONEYLINE_UNVALIDATED_SPORTS's own comment
+        # for why), so a hypothetical sport/threshold is monkeypatched in
+        # here to keep this test actually isolating the odds-cap mechanism,
+        # not just re-proving the blanket gate a second time.
+        monkeypatch.setitem(edge_finder.MAX_MONEYLINE_UNDERDOG_ODDS, "NHL", 10.0)
+        insert_pick(conn, 1, "NHL", "moneyline", settled=0, confidence="Medium", market_odds=15.0)
         changed = edge_finder.reconcile_unvalidated_confidence(conn)
         assert changed == 1
         assert confidence_of(conn, 1) == "Unvalidated"
 
-    def test_moneyline_under_the_odds_cap_is_left_alone(self, conn):
-        insert_pick(conn, 1, "CFB", "moneyline", settled=0, confidence="Medium", market_odds=5.0)
+    def test_moneyline_under_the_odds_cap_is_left_alone(self, conn, monkeypatch):
+        monkeypatch.setitem(edge_finder.MAX_MONEYLINE_UNDERDOG_ODDS, "NHL", 10.0)
+        insert_pick(conn, 1, "NHL", "moneyline", settled=0, confidence="Medium", market_odds=5.0)
         changed = edge_finder.reconcile_unvalidated_confidence(conn)
         assert changed == 0
         assert confidence_of(conn, 1) == "Medium"
+
+    def test_cfb_moneyline_is_now_blanket_gated_regardless_of_odds(self, conn):
+        # Real finding, 2026-11-07 (app owner: "take a look at this and
+        # make any necessary changes to make the algo better"): CFB
+        # moneyline's confidence was found BACKWARDS with real, current
+        # data (the old submodel-agreement confidence_tier(), never fixed
+        # for CFB specifically) -- added to MONEYLINE_UNVALIDATED_SPORTS,
+        # same precedent as NBA. Unlike the odds-cap rule above, this
+        # applies regardless of price.
+        insert_pick(conn, 1, "CFB", "moneyline", settled=0, confidence="Medium", market_odds=1.5)
+        changed = edge_finder.reconcile_unvalidated_confidence(conn)
+        assert changed == 1
+        assert confidence_of(conn, 1) == "Unvalidated"
 
     def test_idempotent_second_call_changes_nothing(self, conn):
         insert_pick(conn, 1, "CFB", "spread", settled=0, confidence="High")

@@ -128,7 +128,31 @@ TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
 # showing a proven-backwards High/Medium/Low badge is worse than showing
 # an explicit "we don't know" -- picks still show up (they cleared a real
 # edge threshold), just without a graded confidence claim.
-MONEYLINE_UNVALIDATED_SPORTS = {"NBA"}
+#
+# CFB added 2026-11-07 (app owner: "take a look at this and make any
+# necessary changes to make the algo better"). The live audit flagged
+# CFB moneyline BACKWARDS with a real, current sample (n=121 settled
+# High+Medium picks, the latest from Oct 20-21 -- not stale pre-fix
+# history, confirmed directly by timestamp the same way CFB total's
+# earlier false alarm was ruled OUT). CFB was never in
+# MARKET_AGREEMENT_CONFIDENCE_SPORTS or this set -- it had been quietly
+# running the old, generic submodel-agreement confidence_tier() the
+# whole time, the exact mechanism already proven backwards for NFL/MLB
+# months ago. Checked whether the SAME validated fix
+# (market_agreement_confidence_tier, FAV/DOG split) transfers: on the
+# real confidence-blind population (every CFB moneyline opportunity
+# clearing 3% edge, no tier filter, n=793), FAV (market_fair_prob>=0.5,
+# n=84) ROI -12.29% vs DOG (n=709) ROI -12.72% -- z=0.04, no real signal
+# either direction. Split-half check makes this unambiguous: the delta
+# FLIPS SIGN entirely (-22.33pp first half vs +11.36pp second half) --
+# not a borderline case, a genuinely unstable non-effect. No other
+# mechanism (edge-magnitude, home/away) was separately re-derived for
+# CFB moneyline specifically, since the FAV/DOG result already rules out
+# the one mechanism with real prior cross-sport support, and this
+# project's own precedent (NBA moneyline/spread) is to gate rather than
+# keep searching indefinitely once a real, current-data check comes back
+# this clearly null.
+MONEYLINE_UNVALIDATED_SPORTS = {"NBA", "CFB"}
 SPREAD_UNVALIDATED_SPORTS = {"NBA", "MLB", "CFB"}
 
 # Adopted 2026-09-14 (app owner decision, after studying the Sept 12-14
