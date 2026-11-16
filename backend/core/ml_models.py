@@ -19,7 +19,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 
-def _make_model() -> HistGradientBoostingRegressor:
+def _make_model(loss: str = "absolute_error") -> HistGradientBoostingRegressor:
     # Deliberately shallow/regularized: a few thousand rows of noisy sports
     # outcomes overfits fast with a deeper/more flexible model.
     #
@@ -32,12 +32,33 @@ def _make_model() -> HistGradientBoostingRegressor:
     # separation this project relies on between "predict the game"
     # (statistical objective) and "is there profit" (backtest evaluation) —
     # that separation is what keeps the model from curve-fitting to the
-    # historical odds sample. Measured honestly: MAE vs squared-error moved
-    # margin/total correlation and backtest ROI by less than their own
-    # standard error — a real but marginal improvement, kept because it's
-    # safe and well-motivated, not because it moved the needle.
+    # historical odds sample. Measured honestly (on NFL): MAE vs squared-
+    # error moved margin/total correlation and backtest ROI by less than
+    # their own standard error — a real but marginal improvement, kept
+    # because it's safe and well-motivated, not because it moved the
+    # needle. Kept as the default for every sport/target that hasn't been
+    # separately re-measured.
+    #
+    # `loss` is now a real parameter (added 2026-11-07, app owner: "take a
+    # look at this and make any necessary changes to make the algo
+    # better") -- NOT a blanket change. MAE is the conditional-MEDIAN-
+    # optimal loss, which only differs materially from the conditional
+    # MEAN when the target's own distribution is skewed; checked directly
+    # per sport rather than assumed uniform: NFL's total distribution
+    # (skew ~0.32) showed squared-error REDUCING correlation (0.2157 ->
+    # 0.1915) despite shrinking bias -- confirming MAE is the right choice
+    # there, unchanged. NHL's total distribution (skew ~0.38, same
+    # direction, comparable magnitude) showed the opposite: squared-error
+    # simultaneously improved correlation (0.0712 -> 0.0806) AND nearly
+    # eliminated a real, substantial bias (-0.53 -> -0.08 goals/game) --
+    # a real, measured, three-way win for NHL's total model specifically,
+    # not a tradeoff. NHL's own margin distribution (skew ~-0.03, already
+    # symmetric) showed no comparable bias problem to fix, so this stays
+    # scoped to NHL's TOTAL model only (see sports/nhl/config.py's
+    # TOTAL_MODEL_LOSS and pipeline.py's build_pipeline() for the wiring)
+    # -- not applied to margin, and not applied globally.
     return HistGradientBoostingRegressor(
-        loss="absolute_error",
+        loss=loss,
         max_depth=3,
         max_iter=150,
         learning_rate=0.05,
@@ -63,6 +84,7 @@ def walk_forward_predict(
     total_col: str = "actual_total",
     game_id_col: str = "game_id",
     min_train_seasons: int = 3,
+    total_loss: str = "absolute_error",
 ) -> WalkForwardResult:
     """
     Returns out-of-sample predictions for every season after the first
@@ -70,6 +92,12 @@ def walk_forward_predict(
     — too little history exists to have produced a walk-forward prediction
     for them, so the backtest correctly excludes them rather than pretending
     they were "predicted").
+
+    `total_loss`: the TOTAL model's own loss (margin always uses
+    `_make_model()`'s own default) -- see that function's docstring for
+    why this is a real, per-sport, per-target parameter now rather than a
+    hardcoded constant (added 2026-11-07, real measured NHL fit
+    improvement from squared-error specifically on the total target).
     """
     seasons = sorted(df[season_col].unique())
     if len(seasons) <= min_train_seasons:
@@ -87,7 +115,7 @@ def walk_forward_predict(
             continue
 
         margin_model = _make_model().fit(X_all[train_mask], df.loc[train_mask, margin_col])
-        total_model = _make_model().fit(X_all[train_mask], df.loc[train_mask, total_col])
+        total_model = _make_model(loss=total_loss).fit(X_all[train_mask], df.loc[train_mask, total_col])
 
         pred_margin = margin_model.predict(X_all[test_mask])
         pred_total = total_model.predict(X_all[test_mask])
@@ -132,10 +160,15 @@ class FinalModels:
 
 
 def fit_final_models(df: pd.DataFrame, feature_cols: list,
-                      margin_col: str = "actual_margin", total_col: str = "actual_total") -> FinalModels:
+                      margin_col: str = "actual_margin", total_col: str = "actual_total",
+                      total_loss: str = "absolute_error") -> FinalModels:
+    """`total_loss`: same real, per-sport parameter as walk_forward_predict()'s
+    own -- see _make_model()'s docstring. Must be passed the SAME value
+    used to validate a sport's walk-forward fit, or this live-scoring
+    model would silently diverge from what was actually measured."""
     X = df[feature_cols].astype(float)
     margin_model = _make_model().fit(X, df[margin_col])
-    total_model = _make_model().fit(X, df[total_col])
+    total_model = _make_model(loss=total_loss).fit(X, df[total_col])
     return FinalModels(margin_model=margin_model, total_model=total_model, feature_cols=feature_cols)
 
 

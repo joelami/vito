@@ -169,6 +169,28 @@ MOV_MULT_DIVISOR = 1.5         # gentle curve for NHL's tiny goal margins - clos
 # std-dev at runtime.
 ELO_POINTS_PER_MARGIN = 124.0
 
+# Real, measured override of core/ml_models.py's own default total-model
+# loss (added 2026-11-07, app owner: "take a look at this and make any
+# necessary changes to make the algo better"). NHL's total (goals scored,
+# both teams combined) distribution is right-skewed (skew ~0.38,
+# comparable to NFL/CFB's own total skew) -- MAE (this project's project-
+# wide default, see _make_model()'s own docstring for why) targets the
+# conditional MEDIAN, which under a real, measured walk-forward
+# comparison left NHL's total model biased low by ~0.53 goals/game on
+# average (mean predicted ~5.29 vs mean actual ~5.80). Switching NHL's
+# total model specifically to squared-error (which targets the
+# conditional MEAN) measured a real three-way win, not a tradeoff:
+# correlation improved (0.0712 -> 0.0806) AND bias nearly vanished
+# (-0.53 -> -0.08). The identical comparison on NFL's own total model
+# showed the OPPOSITE result (squared-error reduced correlation
+# 0.2157 -> 0.1915 despite also shrinking its own, smaller bias) --
+# confirming this is a genuine per-sport difference worth a per-sport
+# override, not a case for changing the project-wide default. NHL's own
+# margin model (goal differential, skew ~-0.03, already symmetric) showed
+# no comparable bias to fix, so this does NOT touch margin -- see
+# pipeline.py's build_pipeline() for where this gets read.
+TOTAL_MODEL_LOSS = "squared_error"
+
 
 # ---------- Season boundaries ----------
 # NHL seasons cross the Jan 1 boundary (regular season Oct -> April,

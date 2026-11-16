@@ -313,7 +313,14 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
         from sports.nhl.moneypuck_xg_features import build_trailing_xg_features, TRAILING_COLS as NHL_XG_TRAILING_COLS
         _nhl_xg_cols = [f"{side}_{c}_l10" for side in ("home", "away") for c in NHL_XG_TRAILING_COLS]
         feats = _safe_add_trailing_feature(feats, build_trailing_xg_features, _nhl_xg_cols, "NHL trailing xG")
-    wf = walk_forward_predict(feats, features.ML_FEATURE_COLS)
+    # Real, per-sport override of the total model's own loss function --
+    # see sports/nhl/config.py's TOTAL_MODEL_LOSS for the full reasoning
+    # (a real, measured NHL-specific fit improvement, not a blanket
+    # change). getattr default matches _make_model()'s own project-wide
+    # default exactly, so every sport without an override is byte-
+    # identical to before.
+    total_loss = getattr(config, "TOTAL_MODEL_LOSS", "absolute_error")
+    wf = walk_forward_predict(feats, features.ML_FEATURE_COLS, total_loss=total_loss)
 
     history_df = feats.set_index("game_id").join(wf.predictions, how="left")
     oos_df = history_df.dropna(subset=["predicted_margin"])
@@ -354,7 +361,7 @@ def build_pipeline(sport: str, persist_backtest: bool = True) -> dict:
                 (sport.upper(), json.dumps(backtest_summary, default=str)),
             )
 
-    final_models = fit_final_models(feats, features.ML_FEATURE_COLS)
+    final_models = fit_final_models(feats, features.ML_FEATURE_COLS, total_loss=total_loss)
     current_season = config.season_for_date(datetime.now())
     current_ratings = rr.ratings_entering_season(current_season)
     # games_for_ratings, same fix and same reasoning as build_nfl_pipeline's
