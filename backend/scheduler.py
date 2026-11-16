@@ -62,6 +62,21 @@ scheduler_status = {
     # for the real, reproduced bug (a one-time pip-install failure
     # permanently wedging the NFL venv) this visibility was built to catch.
     "last_dataset_refresh": None,  # {"cfb": {"ok": bool, "detail": str, "timestamp": str}, "nfl": {...}}
+    # Added 2026-11-16 (app owner: "review all of our data that we have,
+    # ensure that we keep it") -- core/db_backup.py's backup_database()
+    # protects the real, irreplaceable forward-test history (see its own
+    # docstring for the 2026-09-02 Volume-loss incident this exists to
+    # prevent) by uploading a timestamped copy to R2 once per scheduled
+    # run -- but it returns None for THREE different real cases (no R2
+    # creds, the DB file doesn't exist yet, or a genuine upload failure)
+    # and nothing tracked which one happened on any given day, or whether
+    # it happened at all. "last_backup_key" is the real uploaded key (a
+    # string) on success, or None -- paired with
+    # "r2_credentials_configured" (see main.py's /api/admin/scheduler-
+    # status) to actually distinguish "not configured" from "configured
+    # but failing," which a bare None on its own cannot.
+    "last_backup_key": None,
+    "last_backup_attempted_utc": None,
 }
 
 
@@ -203,9 +218,12 @@ def _run_full(pipelines: dict = None):
     # same pattern as _run_parlays above.
     try:
         from core.db_backup import backup_database
-        backup_database()
+        scheduler_status["last_backup_key"] = backup_database()
+        scheduler_status["last_backup_attempted_utc"] = datetime.now(timezone.utc).isoformat()
     except Exception as e:
         print(f"[scheduler] database backup FAILED: {e}")
+        scheduler_status["last_backup_key"] = None
+        scheduler_status["last_backup_attempted_utc"] = datetime.now(timezone.utc).isoformat()
 
     # Real gap this closes: confidence_tier() sat unvalidated against real
     # outcomes for months until someone asked directly (see decision_log.jsonl
@@ -274,9 +292,12 @@ def _run_sync_only():
     # to be -- this is a cheap file upload, not a rebuild.
     try:
         from core.db_backup import backup_database
-        backup_database()
+        scheduler_status["last_backup_key"] = backup_database()
+        scheduler_status["last_backup_attempted_utc"] = datetime.now(timezone.utc).isoformat()
     except Exception as e:
         print(f"[scheduler] database backup FAILED: {e}")
+        scheduler_status["last_backup_key"] = None
+        scheduler_status["last_backup_attempted_utc"] = datetime.now(timezone.utc).isoformat()
 
     scheduler_status["last_sync_run_utc"] = datetime.now(timezone.utc).isoformat()
 

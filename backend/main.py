@@ -925,7 +925,23 @@ def trigger_harness_run(x_admin_token: str = Header(default=None)):
 @app.get("/api/admin/scheduler-status")
 def get_scheduler_status():
     from scheduler import scheduler_status, FULL_RUN_AT, SYNC_ONLY_AT
-    return {**scheduler_status, "full_run_at_utc": FULL_RUN_AT, "sync_only_at_utc": SYNC_ONLY_AT}
+    # Real gap this closes (2026-11-16, app owner: "review all of our
+    # data that we have, ensure that we keep it"): whether R2 credentials
+    # are actually SET on this deployment -- the one thing that decides
+    # whether core/db_backup.py's daily backup/auto-restore is actually
+    # protecting the live forward-test history (real, irreplaceable
+    # picks/settlements -- see db_backup.py's own docstring for the real
+    # 2026-09-02 Volume-loss incident this exists to prevent) or silently
+    # no-op'ing every single day -- was previously unanswerable without
+    # shell access to the Railway container. Checking presence only, not
+    # validity (a real connection attempt belongs in the admin-triggered
+    # backup itself, not a cheap status read); still a real, immediate
+    # improvement over "no way to tell at all."
+    import os
+    r2_configured = all(os.environ.get(k) for k in
+                         ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME"])
+    return {**scheduler_status, "full_run_at_utc": FULL_RUN_AT, "sync_only_at_utc": SYNC_ONLY_AT,
+            "r2_credentials_configured": r2_configured}
 
 
 # ---------------------------------------------------------------------------
