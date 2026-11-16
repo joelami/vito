@@ -120,6 +120,42 @@ class TestTotalUnvalidatedSports:
         assert all(o.confidence != "Unvalidated" for o in totals)
 
 
+class TestNhlTotalOverBiasConfidence:
+    """Added 2026-11-16 (app owner: "review all of our data... run
+    analysis and figure out how we can continue to make our things
+    better") -- NHL total was found backwards with the OPPOSITE real
+    direction from NFL/MLB's validated under-bias fix (see
+    ensemble.py's nhl_total_side_confidence_tier() for the full
+    reasoning and real numbers: z=+3.41, split-half stable)."""
+
+    def test_nhl_over_gets_high_under_gets_low(self):
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="NHL",
+        )
+        totals = {o.side: o for o in opps if o.market == "total"}
+        assert totals["over"].confidence == "High"
+        assert totals["under"].confidence == "Low"
+
+    def test_nfl_total_keeps_the_opposite_mechanism_not_nhls(self):
+        # Real regression this guards: NFL must NEVER pick up NHL's
+        # over-biased mechanism -- the two sets select OPPOSITE tier
+        # functions, so a dispatch bug here would silently flip NFL's
+        # already-validated direction.
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="NFL",
+        )
+        totals = {o.side: o for o in opps if o.market == "total"}
+        assert totals["under"].confidence == "High"
+        assert totals["over"].confidence == "Low"
+
+    def test_cfb_total_stays_unvalidated_not_nhls_mechanism(self):
+        opps = edge_finder.evaluate_game(
+            total_row(), make_stds(), elo_points_per_margin=14.0, cfg=ensemble.EnsembleConfig(), sport="CFB",
+        )
+        totals = [o for o in opps if o.market == "total"]
+        assert all(o.confidence == "Unvalidated" for o in totals)
+
+
 @pytest.fixture
 def conn():
     c = sqlite3.connect(":memory:")

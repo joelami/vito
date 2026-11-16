@@ -343,8 +343,57 @@ def total_side_confidence_tier(side: str) -> str:
     those three are monotonic (not backwards) under the old
     confidence_tier(), so there's no problem to fix there and this
     mechanism was never even checked against their data.
+
+    UPDATE 2026-11-16: NHL total WAS later found backwards (see
+    nhl_total_side_confidence_over_bias() below for the real,
+    OPPOSITE-direction mechanism found for NHL specifically -- a live
+    audit flagged NHL total only after NHL's total MODEL itself got a
+    real bias fix (nhl_total_model_squared_error_loss), which changed
+    which side the model even flags live; NOT evidence this project's
+    original "monotonic, leave alone" call for NHL was wrong at the time
+    it was made. CFB total was separately found backwards and gated to
+    Unvalidated on 2026-09-14, unrelated to this function.
     """
     return "High" if side == "under" else "Low"
+
+
+def nhl_total_side_confidence_tier(side: str) -> str:
+    """
+    NHL TOTAL ONLY -- the mirror image of total_side_confidence_tier()
+    above, OPPOSITE direction. Diagnosed 2026-11-16 as the required
+    follow-up to a live confidence audit flagging NHL total backwards
+    (app owner: "review all of our data... run analysis and figure out
+    how we can continue to make our things better").
+
+    Real, externally-motivated reasoning, checked before trusting the
+    number: NHL is this project's lowest-scoring covered sport, and
+    recreational/casual bettors are documented in hockey-betting
+    literature to systematically underestimate modern NHL scoring rates
+    (faster pace, power-play-emphasis rule changes since the mid-2000s)
+    -- a real "sucker bet on the under" pattern, the mirror image of
+    NFL/MLB's "exciting over" public bias (same underlying mechanism --
+    the public's naive perception diverges from true scoring reality --
+    pointing the OPPOSITE way for a low-scoring sport vs a high-scoring
+    one), not a contradiction of it.
+
+    Measured on the TRUE confidence-blind population (every edge>=3%
+    NHL total opportunity from evaluate_game(), no confidence-tier
+    filter, via the CORRECTED total model -- see
+    sports/nhl/config.py's TOTAL_MODEL_LOSS; re-deriving this against
+    the OLD, pre-fix model would reproduce a contaminated result, since
+    which side that biased model even flagged as a live edge was itself
+    an artifact of the bug, not a real signal -- see
+    sports/nhl/research_total_side_confidence.py's own docstring for the
+    full "why not just reuse the live sample" reasoning): over n=4857
+    ROI +9.32% vs under n=484 ROI -6.03% -- delta 15.35pp on ~4.5pp
+    combined stderr, z=+3.41, clearing the real Bonferroni-aware bar
+    (3.27) at the time of this test. Checked for stability with a
+    season-based split-half, not just the full-sample number: first half
+    delta +3.75pp, second half +17.35pp -- same direction both halves
+    (actually grows, same pattern NFL's own total fix showed). Shrinkage
+    weight 0.91 (large, confident sample) -- recommendation: adopt.
+    """
+    return "High" if side == "over" else "Low"
 
 
 def unvalidated_confidence_tier() -> str:

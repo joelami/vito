@@ -115,12 +115,27 @@ SPREAD_EDGE_MAGNITUDE_CONFIDENCE_SPORTS = {"NHL"}
 # sports (same "under beats over" direction, each with its own real
 # effect size and its own season-based split-half stability check), the
 # same two-sport-independent-confirmation bar moneyline's fix was held to.
-# NOT extended to NBA/NHL total -- the standing audit shows those two are
-# monotonic (not backwards) under the OLD confidence_tier(), so there is
-# no problem there to fix and no reason to touch them. CFB total used to
-# be in this same "monotonic, leave alone" bucket too -- see
-# TOTAL_UNVALIDATED_SPORTS below for why that's no longer true.
+# NOT extended to NBA total -- the standing audit shows it's monotonic
+# (not backwards) under the OLD confidence_tier(), so there is no problem
+# there to fix and no reason to touch it. CFB total used to be in this
+# same "monotonic, leave alone" bucket too -- see TOTAL_UNVALIDATED_SPORTS
+# below for why that's no longer true. NHL total ALSO used to be in this
+# bucket, until a later audit (2026-11-16) found it backwards -- but with
+# the OPPOSITE real direction from NFL/MLB (over beats under for NHL, see
+# ensemble.py's nhl_total_side_confidence_tier() and TOTAL_OVER_BIAS_
+# CONFIDENCE_SPORTS below), so it's gated separately, not added here.
 TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS = {"NFL", "MLB"}
+
+# NHL TOTAL ONLY: the mirror-image mechanism, ensemble.py's
+# nhl_total_side_confidence_tier() ("over" is the strong side for NHL
+# specifically, opposite NFL/MLB's "under" -- see that function's own
+# docstring for the real, externally-motivated reasoning and the
+# measured z=+3.41, split-half-stable numbers). Kept as its own set, not
+# folded into TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS above, since the two
+# sets select OPPOSITE tier functions -- conflating them would be a real,
+# silent correctness bug waiting to happen the moment someone assumes
+# "in this set" always means the same mechanism.
+TOTAL_OVER_BIAS_CONFIDENCE_SPORTS = {"NHL"}
 
 # App-owner decision (2026-09-03), after real investigation found no
 # validated fix for these four (see ensemble.py's unvalidated_confidence_
@@ -362,6 +377,9 @@ def evaluate_game(row, stds: ensemble.ResidualStds, elo_points_per_margin: float
             if sport_u in TOTAL_UNDER_BIAS_CONFIDENCE_SPORTS:
                 conf_over = ensemble.total_side_confidence_tier("over")
                 conf_under = ensemble.total_side_confidence_tier("under")
+            elif sport_u in TOTAL_OVER_BIAS_CONFIDENCE_SPORTS:
+                conf_over = ensemble.nhl_total_side_confidence_tier("over")
+                conf_under = ensemble.nhl_total_side_confidence_tier("under")
             elif sport_u in TOTAL_UNVALIDATED_SPORTS:
                 conf_over = conf_under = ensemble.unvalidated_confidence_tier()
             else:
